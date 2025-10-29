@@ -6,7 +6,7 @@ from datetime import datetime
 from cli import start_cli  
 import time
 from dotenv import load_dotenv
-from db_utils import get_all_permissions
+from db_utils import get_all_permissions, get_all_categories
 import os
 
 load_dotenv()

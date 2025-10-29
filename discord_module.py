@@ -2,15 +2,12 @@ import discord
 import asyncio
 import random
 from datetime import datetime, timedelta
-from db_utils import get_all_statuses
-from db_utils import add_status_request
-from db_utils import get_added_statuses_from_user
-from db_utils import get_all_permissions
-from db_utils import approve_status_by_value
-from db_utils import get_approved_statuses
-from db_utils import get_status_by_category_and_user
-from db_utils import get_statuses_by_category
-from db_utils import get_all_categories
+from db_utils import (
+    get_all_statuses, add_status_request, get_added_statuses_from_user,
+    get_all_permissions, approve_status_by_value, get_approved_statuses,
+    get_status_by_category_and_user, get_statuses_by_category, get_all_categories,
+    remove_status, remove_category, add_category, does_status_exist
+)
 import os
 
 class MyClient(discord.Client):
@@ -82,7 +79,9 @@ class MyClient(discord.Client):
         if message.author.id not in [self.user.id, *[u["user_id"] for u in self.users_with_permissions]]:
             return
             
-        print(f"Message from {message.author}: {message.content}")
+        # print(f"Message from {message.author}: {message.content}")
+        if message.author.id == self.user.id:
+            print(f"Message from me: {message.content}")
 
         if message.content == "!ping":
             await message.channel.send("pong")
@@ -92,7 +91,7 @@ class MyClient(discord.Client):
 
             if user_statuses:
                 status_list = "\n".join(
-                    f"- {s['status']} (dodano: {s['date_add']})"
+                    f"- {s['status']} (zatwierdzony: {'✅' if s['approved_by_user_id'] else '❌'})"
                     for s in user_statuses
                 )
 
@@ -116,7 +115,7 @@ class MyClient(discord.Client):
 
             if user_statuses:
                 status_list = "\n".join(
-                    f"- {s['status']} (dodano: {s['date_add']})"
+                    f"- {s['status']} (zatwierdzony: {'✅' if s['approved_by_user_id'] else '❌'})"
                     for s in user_statuses
                 )
                 await message.channel.send(f"Twoje dodane statusy w kategorii '{category}':\n{status_list}")
@@ -127,17 +126,55 @@ class MyClient(discord.Client):
             await message.add_reaction("❤️")
 
         if message.content.startswith("!add_status "):
-            new_status = message.content[len("!add_status "):].strip()
-            if new_status:
-                add_status_request(
-                    person_name=str(message.author),
-                    person_id=message.author.id,
-                    status=new_status
+            # wytnij "!add_status " z początku
+            raw_args = message.content[len("!add_status "):].strip()
+
+            # rozbij po spacjach
+            parts = raw_args.split()
+
+            print(parts)
+
+            # musi być przynajmniej 2 elementy: [kategoria] [treść...]
+            if len(parts) < 2:
+                await message.channel.send(
+                    "Użycie: `!add_status [kategoria] treść statusu`\n"
+                    "Przykład: `!add_status general Przychodzi do spowiedzi`"
                 )
-                # await message.channel.send(f"Dodano nowy status: {new_status}")
-                await message.add_reaction("✅")
-            else:
-                await message.channel.send("Nie podałeś statusu do dodania.")
+                return
+
+            categories = get_all_categories()
+
+            category = parts[0]
+
+            if category not in [c['label'] for c in categories]:
+                await message.channel.send(
+                    f"Kategoria '{category}' nie istnieje. Dostępne kategorie to: "
+                    + ", ".join(c['label'] for c in categories)
+                )
+                return
+
+            new_status = " ".join(parts[1:]).strip()
+
+            if not new_status:
+                await message.channel.send("Podaj treść statusu po kategorii 🤨")
+                return
+
+
+            if does_status_exist(new_status):
+                await message.add_reaction("❌")
+                await message.channel.send("Taki status już istnieje")
+                return
+
+            # zapis do bazy
+            add_status_request(
+                person_name=str(message.author),
+                person_id=message.author.id,
+                status=new_status,
+                category=category
+            )
+
+            # reakacja na wiadomość zamiast odpowiadania
+            await message.add_reaction("✅")
 
         if message.content.startswith("!status_list "):
             category = message.content[len("!status_list "):].strip()
@@ -145,9 +182,10 @@ class MyClient(discord.Client):
 
             if statuses_in_category:
                 status_list = "\n".join(
-                    f"- {s['status']} (dodano przez: {s['person_name']})"
+                    f"- {s['status']} ({s['person_name']})"
                     for s in statuses_in_category
                 )
+
 
                 if len(status_list) > self.discord_message_length_limit:
                     await message.channel.send("Zbyt wiele statusów w tej kategorii, aby je wyświetlić.")
@@ -156,13 +194,38 @@ class MyClient(discord.Client):
             else:
                 await message.channel.send(f"Brak statusów w kategorii '{category}'.")
 
-        if message.content == "!cls" and message.author.id == self.user.id:
-            os.system('cls' if os.name == 'nt' else 'clear')
-
         if message.content == "!categories":
             categories = get_all_categories()
-            category_list = ", ".join(c for c in categories)
+            category_list = ", ".join(c['label'] for c in categories)
             await message.channel.send(f"Dostępne kategorie statusów:\n{category_list}")
+
+        if message.content.startswith("!add_category "):
+            new_category = message.content[len("!add_category "):].strip()
+            if new_category:
+                add_category(
+                    created_by_user_id=message.author.id,
+                    label=new_category
+                )
+                await message.add_reaction("✅")
+            else:
+                await message.channel.send("Nie podałeś nazwy kategorii do dodania.")
+
+        if message.content.startswith("!remove_category "):
+            categories = get_all_categories()
+            categories_labels = [c['label'] for c in categories]
+            category_to_remove = message.content[len("!remove_category "):].strip()
+            if category_to_remove:
+                if category_to_remove in categories_labels:
+                    created_by_user_id = next(c['created_by_user_id'] for c in categories if c['label'] == category_to_remove)
+                    if created_by_user_id != message.author.id:
+                        await message.channel.send(f"Możesz usuwać tylko kategorie, które sam dodałeś.")
+                        return
+                    else:
+                        await message.add_reaction("✅")
+                else:
+                    await message.channel.send(f"Nie znaleziono kategorii: {category_to_remove}")
+            else:
+                await message.channel.send("Nie podałeś nazwy kategorii do usunięcia.")
 
         if message.content == "!help":
             help_text = (
@@ -173,7 +236,6 @@ class MyClient(discord.Client):
                 "- !add_status <status>: Dodaje nowy status do bazy propozycji\n"
                 "- !status_list <kategoria>: Pokazuje listę dostępnych statusów w danej kategorii\n"
                 "- !categories: Pokazuje listę dostępnych kategorii statusów\n"
-                "- !cls: Czyści konsolę (tylko dla właściciela bota)\n"
                 "- !help: Pokazuje tę wiadomość pomocy\n"
                 "- [github repo](https://github.com/Magiszonekk/discord_self_bot_magiszonek)"
             )

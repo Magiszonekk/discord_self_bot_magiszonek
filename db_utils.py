@@ -33,8 +33,22 @@ def init_db():
     """)
 
     cursor.execute("""
+    CREATE TABLE IF NOT EXISTS categories (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        created_by_user_id INTEGER NOT NULL,
+        label TEXT NOT NULL,
+        date_add DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
+
+    cursor.execute("""
         CREATE UNIQUE INDEX IF NOT EXISTS status_unique_idx 
         ON status_requests (status);
+    """)
+
+    cursor.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS category_unique_idx 
+        ON categories (label);
     """)
 
 
@@ -54,14 +68,14 @@ def get_all_statuses():
     conn.close()
     return rows
 
-def add_status_request(person_name: str, person_id: int, status: str):
+def add_status_request(person_name: str, person_id: int, status: str, category: str = "general"):
     conn = sqlite3.connect("bot_data.db")
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
 
     cursor.execute(
-        "INSERT INTO status_requests (person_name, person_id, status) VALUES (?, ?, ?)",
-        (person_name, person_id, status)
+        "INSERT INTO status_requests (person_name, person_id, status, category) VALUES (?, ?, ?, ?)",
+        (person_name, person_id, status, category)
     )
 
     conn.commit()
@@ -147,15 +161,67 @@ def get_statuses_by_category(category: str):
     conn.close()
     return rows
 
-def get_all_categories():
+def add_category(created_by_user_id: int, label: str):
     conn = sqlite3.connect("bot_data.db")
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
 
     cursor.execute(
-        "SELECT DISTINCT category FROM status_requests"
+        "INSERT INTO categories (created_by_user_id, label) VALUES (?, ?)",
+        (created_by_user_id, label)
     )
+
+    conn.commit()
+    conn.close()
+
+def remove_category(label: str):
+    conn = sqlite3.connect("bot_data.db")
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+
+    cursor.execute(
+        "DELETE FROM categories WHERE label = ?",
+        (label,)
+    )
+
+    conn.commit()
+    conn.close()
+
+def remove_status(status: str):
+    conn = sqlite3.connect("bot_data.db")
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+
+    cursor.execute(
+        "DELETE FROM status_requests WHERE status = ?",
+        (status,)
+    )
+
+    conn.commit()
+    conn.close()
+
+def get_all_categories():
+    conn = sqlite3.connect("bot_data.db")
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT * FROM categories ORDER BY date_add DESC")
     rows = cursor.fetchall()
 
     conn.close()
-    return [row["category"] for row in rows]
+    return rows
+
+def does_status_exist(status: str) -> bool:
+    conn = sqlite3.connect("bot_data.db")
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+
+    cursor.execute(
+        "SELECT COUNT(*) as count FROM status_requests WHERE status = ?",
+        (status,)
+    )
+    row = cursor.fetchone()
+    exists = row["count"] > 0
+
+    conn.close()
+    return exists
