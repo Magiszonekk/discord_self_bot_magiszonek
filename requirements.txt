@@ -1,0 +1,5 @@
+discord.py-self
+aiohttp
+requests
+protobuf<5
+python-dotenv

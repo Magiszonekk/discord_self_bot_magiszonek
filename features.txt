@@ -1,0 +1,7 @@
+jak jjp napisze ty chuju to daj reakcje heart 
+losowy ststus z listy co 25-45 minut 
+!ping -> pong 
+!help 
+!add_status -> dodaje do bazy pomysł na ststus 
+!status_list -> lista zatwierdzonych ststusów 
+!my_statuses -> lista statusów danego użytkownika 
