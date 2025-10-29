@@ -6,6 +6,7 @@ from datetime import datetime
 from cli import start_cli  
 import time
 from dotenv import load_dotenv
+from db_utils import get_all_permissions
 import os
 
 load_dotenv()
@@ -23,5 +24,3 @@ async def main():
         await client.start(DISCORD_TOKEN)
         
 asyncio.run(main())
-
-# my id 670188112214753280

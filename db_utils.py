@@ -45,6 +45,7 @@ def init_db():
 
 def get_all_statuses():
     conn = sqlite3.connect("bot_data.db")
+    conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
 
     cursor.execute("SELECT * FROM status_requests ORDER BY date_add DESC")
@@ -55,6 +56,7 @@ def get_all_statuses():
 
 def add_status_request(person_name: str, person_id: int, status: str):
     conn = sqlite3.connect("bot_data.db")
+    conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
 
     cursor.execute(
@@ -67,19 +69,22 @@ def add_status_request(person_name: str, person_id: int, status: str):
 
 def get_added_statuses_from_user(person_id: int):
     conn = sqlite3.connect("bot_data.db")
+    conn.row_factory = sqlite3.Row 
     cursor = conn.cursor()
 
     cursor.execute(
         "SELECT * FROM status_requests WHERE person_id = ? ORDER BY date_add DESC",
         (person_id,)
     )
-    rows = cursor.fetchall()
 
+    rows = cursor.fetchall()
     conn.close()
     return rows
 
+
 def get_all_permissions():
     conn = sqlite3.connect("bot_data.db")
+    conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
 
     cursor.execute("SELECT * FROM permissions ORDER BY date_add DESC")
@@ -90,6 +95,7 @@ def get_all_permissions():
 
 def approve_status_by_value(status: str, approved_by_user_id: int):
     conn = sqlite3.connect("bot_data.db")
+    conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
 
     cursor.execute(
@@ -100,8 +106,23 @@ def approve_status_by_value(status: str, approved_by_user_id: int):
     conn.commit()
     conn.close()
 
+def get_status_by_category_and_user(category: str, person_id: int):
+    conn = sqlite3.connect("bot_data.db")
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+
+    cursor.execute(
+        "SELECT * FROM status_requests WHERE category = ? AND person_id = ? ORDER BY date_add DESC",
+        (category, person_id)
+    )
+    rows = cursor.fetchall()
+
+    conn.close()
+    return rows
+
 def get_approved_statuses():
     conn = sqlite3.connect("bot_data.db")
+    conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
 
     cursor.execute(
@@ -111,3 +132,30 @@ def get_approved_statuses():
 
     conn.close()
     return rows
+
+def get_statuses_by_category(category: str):
+    conn = sqlite3.connect("bot_data.db")
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+
+    cursor.execute(
+        "SELECT * FROM status_requests WHERE category = ? AND approved_by_user_id IS NOT NULL ORDER BY date_add DESC",
+        (category,)
+    )
+    rows = cursor.fetchall()
+
+    conn.close()
+    return rows
+
+def get_all_categories():
+    conn = sqlite3.connect("bot_data.db")
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+
+    cursor.execute(
+        "SELECT DISTINCT category FROM status_requests"
+    )
+    rows = cursor.fetchall()
+
+    conn.close()
+    return [row["category"] for row in rows]

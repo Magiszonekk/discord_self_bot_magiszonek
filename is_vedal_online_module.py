@@ -72,14 +72,14 @@ async def vedal_watch_loop(client_ref, startup_time: datetime):
 
             if should_skip_today(startup_time, now):
                 sleep_s = seconds_until_next_day_window(now)
-                print(f"[{now:%H:%M:%S}] 🚫 Start dziś po 20:00, pomijam. Śpię {sleep_s}s do jutra 20:00")
+                # print(f"[{now:%H:%M:%S}] 🚫 Start dziś po 20:00, pomijam. Śpię {sleep_s}s do jutra 20:00")
                 await asyncio.sleep(sleep_s)
                 continue
 
             # jeśli już wysłaliśmy dzisiaj info -> śpimy do jutra 20:00
             if client_ref.already_notified_today:
                 sleep_s = seconds_until_next_day_window(now)
-                print(f"[{now:%H:%M:%S}] ✅ Już zgłoszone dziś. Śpię {sleep_s}s do jutra 20:00")
+                # print(f"[{now:%H:%M:%S}] ✅ Już zgłoszone dziś. Śpię {sleep_s}s do jutra 20:00")
                 client_ref.already_notified_today = False  # zresetujemy dopiero po sleepie
                 await asyncio.sleep(sleep_s)
                 continue
@@ -87,7 +87,7 @@ async def vedal_watch_loop(client_ref, startup_time: datetime):
             # jeśli nie jesteśmy w oknie 20-22 -> śpij do startu okna
             if not in_time_window(now):
                 sleep_s = seconds_until_next_window(now)
-                print(f"[{now:%H:%M:%S}] Poza oknem. Śpię {sleep_s}s do kolejnego okna.")
+                # print(f"[{now:%H:%M:%S}] Poza oknem. Śpię {sleep_s}s do kolejnego okna.")
                 await asyncio.sleep(sleep_s)
                 continue
 
