@@ -17,3 +17,5 @@ venv2/
 # System
 .DS_Store
 Thumbs.db
+
+bot_data.db
