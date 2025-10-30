@@ -115,14 +115,14 @@ class MyClient(discord.Client):
                     for s in user_statuses:
                         category = s['category']  # pierwsze słowo jako kategoria
                         status_list_categories.add(category)
-                    await message.channel.send("Masz zbyt wiele dodanych statusów, aby je wyświetlić, ale możesz podać konkretną tematykę (!my_statuses temat).\nDo wyboru masz:")
+                    await message.channel.send("## Masz zbyt wiele dodanych statusów, aby je wyświetlić, ale możesz podać konkretną tematykę (!my_statuses temat).\nDo wyboru masz:")
                     await message.channel.send(", ".join(status_list_categories))
 
                 else:
                     print(status_list)
-                    await message.channel.send(f"Twoje dodane statusy:\n{status_list}")
+                    await message.channel.send(f"## Twoje dodane statusy:\n{status_list}")
             else:
-                await message.channel.send("Nie dodałeś jeszcze żadnych statusów.")
+                await message.channel.send("## Nie dodałeś jeszcze żadnych statusów.")
 
         if message.content.startswith("!my_statuses "):
             category = message.content[len("!my_statuses "):].strip()
@@ -133,9 +133,9 @@ class MyClient(discord.Client):
                     f"- ({s['id']}) {s['status']} {'✅' if s['approved_by_user_id'] else '❌'}"
                     for s in user_statuses
                 )
-                await message.channel.send(f"Twoje dodane statusy w kategorii '{category}':\n{status_list}")
+                await message.channel.send(f"## Twoje dodane statusy w kategorii '{category}':\n{status_list}")
             else:
-                await message.channel.send(f"Nie dodałeś jeszcze żadnych statusów w kategorii '{category}'.")
+                await message.channel.send(f"## Nie dodałeś jeszcze żadnych statusów w kategorii '{category}'.")
 
         if message.content.startswith("!remove_status "):
             status_to_remove = message.content[len("!remove_status "):].strip()
@@ -143,7 +143,7 @@ class MyClient(discord.Client):
             user_status_values = [s['id'] for s in user_statuses]
 
             if status_to_remove not in user_status_values:
-                await message.channel.send("Nie możesz usunąć statusu, którego nie dodałeś.")
+                await message.channel.send("## Nie możesz usunąć statusu, którego nie dodałeś.")
                 return
 
             if status_to_remove in user_status_values:
@@ -151,7 +151,7 @@ class MyClient(discord.Client):
                 await message.add_reaction("✅")
             else:
                 message.add_reaction("❌")
-                await message.channel.send("Nie znalazłem takiego statusu do usunięcia w twoich dodanych statusach.")
+                await message.channel.send("## Nie znalazłem takiego statusu do usunięcia w twoich dodanych statusach.")
 
         if "ty chuju" in message.content.lower() and len(message.content) < 12 and message.author.id == self.target_user_id:
             await message.add_reaction("❤️")
@@ -222,15 +222,15 @@ class MyClient(discord.Client):
                 if len(status_list) > self.discord_message_length_limit:
                     await message.channel.send("Zbyt wiele statusów w tej kategorii, aby je wyświetlić.")
                 else:
-                    await message.channel.send(f"Statusy w kategorii '{category}':\n{status_list}")
+                    await message.channel.send(f"## Statusy w kategorii '{category}':\n{status_list}")
             else:
-                await message.channel.send(f"Brak statusów w kategorii '{category}'.")
+                await message.channel.send(f"## Brak statusów w kategorii '{category}'.")
 
         if message.content == "!category_list":
             categories = get_all_categories()
             category_list = "\n- ".join(c['label'] for c in categories)
             category_list = "- " + category_list
-            await message.channel.send(f"Dostępne kategorie statusów:\n{category_list}")
+            await message.channel.send(f"## Dostępne kategorie statusów:\n{category_list}")
 
         if message.content.startswith("!add_category "):
             new_category = message.content[len("!add_category "):].strip()
