@@ -86,6 +86,21 @@ class MyClient(discord.Client):
         if message.content == "!ping":
             await message.channel.send("pong")
 
+        if message.content == "!rotate_status":
+            new_status = random.choice(self.statuses)
+            print(f"[{datetime.now():%H:%M}] Ręczna zmiana statusu na: {new_status['status']}")
+
+            try:
+                await self.change_presence(
+                    activity=discord.CustomActivity(new_status['status']),
+                    status=discord.Status.online,
+                    edit_settings=True
+                )
+                await message.add_reaction("✅")
+            except Exception as e:
+                print("change_presence error (manual):", e)
+                await message.add_reaction("❌")
+
         if message.content == "!my_statuses":
             user_statuses = get_added_statuses_from_user(message.author.id)
 
@@ -211,7 +226,7 @@ class MyClient(discord.Client):
             else:
                 await message.channel.send(f"Brak statusów w kategorii '{category}'.")
 
-        if message.content == "!categories":
+        if message.content == "!category_list":
             categories = get_all_categories()
             category_list = "\n- ".join(c['label'] for c in categories)
             category_list = "- " + category_list
@@ -253,16 +268,25 @@ class MyClient(discord.Client):
 
         if message.content == "!help":
             help_text = (
-                "Dostępne komendy:\n"
-                "- !ping: Odpowiada 'pong'\n"
-                "- !my_statuses: Pokazuje twoje dodane propozycje statusów\n"
-                "- !my_statuses <kategoria>: Pokazuje twoje dodane propozycje statusów w danej kategorii\n"
-                "- !add_status <status>: Dodaje nowy status do bazy propozycji\n"
-                "- !remove_status <id>: Usuwa status z bazy propozycji\n"
-                "- !status_list <kategoria>: Pokazuje listę statusów w danej kategorii\n"
-                "- !add_category <nazwa>: Dodaje nową kategorię statusów\n"
-                "- !categories: Pokazuje listę dostępnych kategorii statusów\n"
-                "- !help: Pokazuje tę wiadomość pomocy\n"
+                "# Commands list:\n"
+                "## General:\n"
+                "- **!help**: Pokazuje tę wiadomość pomocy\n"
+                "- **!ping**: Odpowiada 'pong'\n"
+                "- **!rotate_status**: Natychmiast zmienia status na losowy z zatwierdzonych\n\n"
+
+                "## Statuses:\n"
+                "- **!status_list <kategoria>**: Pokazuje listę statusów w danej kategorii\n\n"
+                "- **!my_status_list**: Pokazuje twoje dodane propozycje statusów\n"
+                "- **!my_status_list <kategoria>**: Pokazuje twoje dodane propozycje statusów w danej kategorii\n\n"
+                "- **!add_status <status>**: Dodaje nowy status do bazy propozycji\n"
+                "- **!remove_status <id>**: Usuwa status z bazy propozycji\n"
+
+                "## Categories:\n"
+                "- **!category_list**: Pokazuje listę dostępnych kategorii statusów\n"
+                "- **!add_category <nazwa>**: Dodaje nową kategorię statusów\n"
+                "- **!remove_category <nazwa>**: Usuwa kategorię statusów (jeśli ją dodałeś)\n"
+
+                "## URL:\n"
                 "- [github repo](https://github.com/Magiszonekk/discord_self_bot_magiszonek)"
             )
             await message.channel.send(help_text,suppress_embeds=True)
