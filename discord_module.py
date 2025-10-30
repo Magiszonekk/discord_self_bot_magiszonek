@@ -86,7 +86,7 @@ class MyClient(discord.Client):
         if message.content == "!ping":
             await message.channel.send("pong")
 
-        if message.content == "!rotate_status":
+        if message.content == "!change_status":
             new_status = random.choice(self.statuses)
             print(f"[{datetime.now():%H:%M}] Ręczna zmiana statusu na: {new_status['status']}")
 
@@ -272,7 +272,7 @@ class MyClient(discord.Client):
                 "## General:\n"
                 "- **!help**: Pokazuje tę wiadomość pomocy\n"
                 "- **!ping**: Odpowiada 'pong'\n"
-                "- **!rotate_status**: Natychmiast zmienia status na losowy z zatwierdzonych\n\n"
+                "- **!change_status**: Natychmiast zmienia status na losowy z zatwierdzonych\n\n"
 
                 "## Statuses:\n"
                 "- **!status_list <kategoria>**: Pokazuje listę statusów w danej kategorii\n\n"
