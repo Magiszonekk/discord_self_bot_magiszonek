@@ -187,14 +187,14 @@ def remove_category(label: str):
     conn.commit()
     conn.close()
 
-def remove_status(status: str):
+def remove_status(id: int):
     conn = sqlite3.connect("bot_data.db")
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
 
     cursor.execute(
-        "DELETE FROM status_requests WHERE status = ?",
-        (status,)
+        "DELETE FROM status_requests WHERE id = ?",
+        (id,)
     )
 
     conn.commit()

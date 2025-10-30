@@ -15,7 +15,7 @@ class MyClient(discord.Client):
         # self_bot=True jest wymagane dla discord.py-self
         super().__init__(self_bot=True)
 
-        self.target_user_id = 532637329211392002  # <- twój ID lub ID do powiadomień
+        self.target_user_id = 670188112214753280  # <- twój ID lub ID do powiadomień
         self.already_notified_today = False
         self.bg_tasks_started = False
         self.status_rotation_interval = {"min": 25, "max": 45}  # losowo co ile minut zmieniać status
@@ -91,7 +91,7 @@ class MyClient(discord.Client):
 
             if user_statuses:
                 status_list = "\n".join(
-                    f"- {s['status']} (zatwierdzony: {'✅' if s['approved_by_user_id'] else '❌'})"
+                    f"- ({s['id']}) {s['status']} {'✅' if s['approved_by_user_id'] else '❌'}"
                     for s in user_statuses
                 )
 
@@ -115,12 +115,28 @@ class MyClient(discord.Client):
 
             if user_statuses:
                 status_list = "\n".join(
-                    f"- {s['status']} (zatwierdzony: {'✅' if s['approved_by_user_id'] else '❌'})"
+                    f"- ({s['id']}) {s['status']} {'✅' if s['approved_by_user_id'] else '❌'}"
                     for s in user_statuses
                 )
                 await message.channel.send(f"Twoje dodane statusy w kategorii '{category}':\n{status_list}")
             else:
                 await message.channel.send(f"Nie dodałeś jeszcze żadnych statusów w kategorii '{category}'.")
+
+        if message.content.startswith("!remove_status "):
+            status_to_remove = message.content[len("!remove_status "):].strip()
+            user_statuses = get_added_statuses_from_user(message.author.id)
+            user_status_values = [s['id'] for s in user_statuses]
+
+            if status_to_remove not in user_status_values:
+                await message.channel.send("Nie możesz usunąć statusu, którego nie dodałeś.")
+                return
+
+            if status_to_remove in user_status_values:
+                remove_status(status_to_remove)
+                await message.add_reaction("✅")
+            else:
+                message.add_reaction("❌")
+                await message.channel.send("Nie znalazłem takiego statusu do usunięcia w twoich dodanych statusach.")
 
         if "ty chuju" in message.content.lower() and len(message.content) < 12 and message.author.id == self.target_user_id:
             await message.add_reaction("❤️")
@@ -147,9 +163,10 @@ class MyClient(discord.Client):
             category = parts[0]
 
             if category not in [c['label'] for c in categories]:
+                await message.add_reaction("❌")
                 await message.channel.send(
-                    f"Kategoria '{category}' nie istnieje. Dostępne kategorie to: "
-                    + ", ".join(c['label'] for c in categories)
+                    f"Kategoria '{category}' nie istnieje.\n Dostępne kategorie to: \n- "
+                    + "\n- ".join(c['label'] for c in categories)
                 )
                 return
 
@@ -196,11 +213,17 @@ class MyClient(discord.Client):
 
         if message.content == "!categories":
             categories = get_all_categories()
-            category_list = ", ".join(c['label'] for c in categories)
+            category_list = "\n- ".join(c['label'] for c in categories)
+            category_list = "- " + category_list
             await message.channel.send(f"Dostępne kategorie statusów:\n{category_list}")
 
         if message.content.startswith("!add_category "):
             new_category = message.content[len("!add_category "):].strip()
+
+            if " " in new_category:
+                await message.channel.send("Nazwa kategorii nie może zawierać spacji.")
+                return
+
             if new_category:
                 add_category(
                     created_by_user_id=message.author.id,
@@ -221,6 +244,7 @@ class MyClient(discord.Client):
                         await message.channel.send(f"Możesz usuwać tylko kategorie, które sam dodałeś.")
                         return
                     else:
+                        remove_category(category_to_remove)
                         await message.add_reaction("✅")
                 else:
                     await message.channel.send(f"Nie znaleziono kategorii: {category_to_remove}")
@@ -234,7 +258,9 @@ class MyClient(discord.Client):
                 "- !my_statuses: Pokazuje twoje dodane propozycje statusów\n"
                 "- !my_statuses <kategoria>: Pokazuje twoje dodane propozycje statusów w danej kategorii\n"
                 "- !add_status <status>: Dodaje nowy status do bazy propozycji\n"
-                "- !status_list <kategoria>: Pokazuje listę dostępnych statusów w danej kategorii\n"
+                "- !remove_status <id>: Usuwa status z bazy propozycji\n"
+                "- !status_list <kategoria>: Pokazuje listę statusów w danej kategorii\n"
+                "- !add_category <nazwa>: Dodaje nową kategorię statusów\n"
                 "- !categories: Pokazuje listę dostępnych kategorii statusów\n"
                 "- !help: Pokazuje tę wiadomość pomocy\n"
                 "- [github repo](https://github.com/Magiszonekk/discord_self_bot_magiszonek)"
