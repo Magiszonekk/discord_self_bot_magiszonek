@@ -101,12 +101,12 @@ class MyClient(discord.Client):
                 print("change_presence error (manual):", e)
                 await message.add_reaction("❌")
 
-        if message.content == "!my_statuses":
+        if message.content == "!my_status_list":
             user_statuses = get_added_statuses_from_user(message.author.id)
 
             if user_statuses:
                 status_list = "\n".join(
-                    f"- ({s['id']}) {s['status']} {'✅' if s['approved_by_user_id'] else '❌'}"
+                    f"- ({s['id']}) **{s['status']}** {'✅' if s['approved_by_user_id'] else '❌'}"
                     for s in user_statuses
                 )
 
@@ -124,13 +124,13 @@ class MyClient(discord.Client):
             else:
                 await message.channel.send("## Nie dodałeś jeszcze żadnych statusów.")
 
-        if message.content.startswith("!my_statuses "):
-            category = message.content[len("!my_statuses "):].strip()
+        if message.content.startswith("!my_status_list "):
+            category = message.content[len("!my_status_list "):].strip()
             user_statuses = get_status_by_category_and_user(category, message.author.id)
 
             if user_statuses:
                 status_list = "\n".join(
-                    f"- ({s['id']}) {s['status']} {'✅' if s['approved_by_user_id'] else '❌'}"
+                    f"- ({s['id']}) **{s['status']}** {'✅' if s['approved_by_user_id'] else '❌'}"
                     for s in user_statuses
                 )
                 await message.channel.send(f"## Twoje dodane statusy w kategorii '{category}':\n{status_list}")
@@ -214,7 +214,7 @@ class MyClient(discord.Client):
 
             if statuses_in_category:
                 status_list = "\n".join(
-                    f"- {s['status']} ({s['person_name']})"
+                    f"- **{s['status']}** ({s['person_name']})"
                     for s in statuses_in_category
                 )
 
