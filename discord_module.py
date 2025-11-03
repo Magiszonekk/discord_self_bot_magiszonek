@@ -6,7 +6,8 @@ from db_utils import (
     get_all_statuses, add_status_request, get_added_statuses_from_user,
     get_all_permissions, approve_status_by_value, get_approved_statuses,
     get_status_by_category_and_user, get_statuses_by_category, get_all_categories,
-    remove_status, remove_category, add_category, does_status_exist
+    remove_status, remove_category, add_category, does_status_exist, get_all_permissions,
+    add_permission, remove_permission
 )
 import os
 
@@ -15,13 +16,15 @@ class MyClient(discord.Client):
         # self_bot=True jest wymagane dla discord.py-self
         super().__init__(self_bot=True)
 
-        self.target_user_id = 670188112214753280  # <- twój ID lub ID do powiadomień
+        self.target_user_id = 427698599179059202  # <- twój ID lub ID do powiadomień
         self.already_notified_today = False
         self.bg_tasks_started = False
         self.status_rotation_interval = {"min": 25, "max": 45}  # losowo co ile minut zmieniać status
         self.users_with_permissions = get_all_permissions()
         self.discord_message_length_limit = 2000
         self.statuses = get_approved_statuses()
+        self.rotate_status = True
+        self.vedal_loop = True
 
     async def on_ready(self):
         print("Logged on as", self.user)
@@ -58,7 +61,7 @@ class MyClient(discord.Client):
                 print("change_presence error (daily):", e)
 
     async def rotate_status_task(self):
-        while True:
+        while self.rotate_status:
             try:
                 activity = discord.CustomActivity(random.choice(self.statuses)['status'])
                 await self.change_presence(
@@ -80,8 +83,8 @@ class MyClient(discord.Client):
             return
             
         # print(f"Message from {message.author}: {message.content}")
-        if message.author.id == self.user.id:
-            print(f"Message from me: {message.content}")
+        # if message.author.id == self.user.id:
+        print(f"Message from {message.author} ({message.author.id}): {message.content}")
 
         if message.content == "!ping":
             await message.channel.send("pong")
@@ -266,6 +269,65 @@ class MyClient(discord.Client):
             else:
                 await message.channel.send("Nie podałeś nazwy kategorii do usunięcia.")
 
+        if message.content == "!permissions_list":
+            if message.author.id != self.user.id:
+                return
+            permissions = get_all_permissions()
+            permission_list = "\n".join(
+                f"- User ID: **{p['user_id']}**, Label: **{p['label']}**"
+                for p in permissions
+            )
+            await message.channel.send(f"## Lista użytkowników z uprawnieniami:\n{permission_list}")
+
+        if message.content.startswith("!add_permission "):
+            if message.author.id != self.user.id:
+                return
+            parts = message.content[len("!add_permission "):].strip().split()
+            if len(parts) < 2:
+                await message.channel.send("Użycie: `!add_permission <user_id> <label>`")
+                return
+
+            try:
+                user_id = int(parts[0])
+            except ValueError:
+                await message.channel.send("Nieprawidłowy user_id. Musi być liczbą.")
+                return
+
+            label = " ".join(parts[1:]).strip()
+            add_permission(user_id, label)
+            await message.add_reaction("✅")
+
+        if message.content.startswith("!remove_permission "):
+            if message.author.id != self.user.id:
+                return
+            parts = message.content[len("!remove_permission "):].strip().split()
+            if len(parts) < 1:
+                await message.channel.send("Użycie: `!remove_permission <user_id>`")
+                return
+
+            try:
+                user_id = int(parts[0])
+            except ValueError:
+                await message.channel.send("Nieprawidłowy user_id. Musi być liczbą.")
+                return
+
+            remove_permission(user_id)
+            await message.add_reaction("✅")
+
+        if message.content == "!rotate_status":
+            if message.author.id != self.user.id:
+                return
+            self.rotate_status = not self.rotate_status
+            status_text = "włączona" if self.rotate_status else "wyłączona"
+            await message.channel.send(f"Automatyczna rotacja statusów {status_text}.")
+
+        if message.content == "!vedal_loop":
+            if message.author.id != self.user.id:
+                return
+            self.vedal_loop = not self.vedal_loop
+            status_text = "włączona" if self.vedal_loop else "wyłączona"
+            await message.channel.send(f"Vedal watch loop {status_text}.")
+
         if message.content == "!help":
             help_text = (
                 "# Commands list:\n"
@@ -290,7 +352,24 @@ class MyClient(discord.Client):
                 "- [github repo](https://github.com/Magiszonekk/discord_self_bot_magiszonek)"
             )
             await message.channel.send(help_text,suppress_embeds=True)
-                
+
+        if message.content == "!help 2":
+            help_text = (
+                "# Admin commands:\n"
+                "## Ogólne:\n"
+                "- **!rotate_status**: Włącza/wyłącza automatyczną rotację statusów\n"
+                "- **!vedal_loop**: Włącza/wyłącza pętlę sprawdzającą czy Vedal jest online\n\n"
+
+                "## Permisje:\n"
+                "- **!permissions_list**: Pokazuje listę użytkowników z uprawnieniami\n"
+                "- **!add_permission <user_id> <label>**: Dodaje uprawnienie dla użytkownika\n"
+                "- **!remove_permission <user_id>**: Usuwa uprawnienie dla użytkownika\n\n"
+
+                "## URL:\n"
+                "- [github repo](https://github.com/Magiszonekk/discord_self_bot_magiszonek)"
+            )
+            await message.channel.send(help_text,suppress_embeds=True)
+
     async def on_reaction_add(self, reaction, user):
         # if user.id not in [self.user.id, *self.users_with_permissions]:
         if user.id != self.user.id:

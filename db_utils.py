@@ -225,3 +225,40 @@ def does_status_exist(status: str) -> bool:
 
     conn.close()
     return exists
+
+def get_all_permissions():
+    conn = sqlite3.connect("bot_data.db")
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT * FROM permissions ORDER BY date_add DESC")
+    rows = cursor.fetchall()
+
+    conn.close()
+    return rows
+
+def add_permission(user_id: int, label: str, permissions: str, category: str = "general"):
+    conn = sqlite3.connect("bot_data.db")
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+
+    cursor.execute(
+        "INSERT INTO permissions (user_id, label, permissions, category) VALUES (?, ?, ?, ?)",
+        (user_id, label, permissions, category)
+    )
+
+    conn.commit()
+    conn.close()
+
+def remove_permission(user_id: int):
+    conn = sqlite3.connect("bot_data.db")
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+
+    cursor.execute(
+        "DELETE FROM permissions WHERE user_id = ?",
+        (user_id,)
+    )
+
+    conn.commit()
+    conn.close()

@@ -67,7 +67,7 @@ async def vedal_watch_loop(client_ref, startup_time: datetime):
     session_timeout = aiohttp.ClientTimeout(total=10)
 
     async with aiohttp.ClientSession(timeout=session_timeout) as session:
-        while True:
+        while client_ref.vedal_loop:
             now = datetime.now()
 
             if should_skip_today(startup_time, now):
