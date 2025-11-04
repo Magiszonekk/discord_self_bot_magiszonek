@@ -5,23 +5,24 @@ def clear_screen():
     os.system("cls" if os.name == "nt" else "clear")
 
 def cli_loop():
-    """Prosty CLI loop działający w osobnym wątku."""
-    print("CLI ready 😎 (komenda: cls)")
+    """Simple CLI loop running in a separate thread."""
+    print("CLI ready 😎 (command: cls)")
     while True:
         try:
             raw = input("> ").strip().lower()
         except EOFError:
-            break  # np. terminal zamknięty
+            break  # e.g. terminal closed
 
         if not raw:
             continue
 
-        if raw == "cls":
+        if raw == "cls" or raw == "csl":
+            # csl because common typo
             clear_screen()
         else:
-            print(f"nieznana komenda: {raw}")
+            print(f"unknown command: {raw}")
 
 def start_cli():
-    """Uruchamia CLI w tle (nie blokuje asyncio)."""
+    """Starts the CLI in the background (does not block asyncio)."""
     thread = threading.Thread(target=cli_loop, daemon=True)
     thread.start()

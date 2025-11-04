@@ -18,7 +18,7 @@ startup_time = datetime.now()
 
 async def main():
     init_db()
-    start_cli()  # uruchomienie interfejsu CLI
+    start_cli()  # launch the CLI interface
     async with client:
         asyncio.create_task(vedal_watch_loop(client, startup_time))
         await client.start(DISCORD_TOKEN)

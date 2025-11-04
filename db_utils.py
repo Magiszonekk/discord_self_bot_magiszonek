@@ -5,11 +5,11 @@ conn = sqlite3.connect("bot_data.db")
 cursor = conn.cursor()
 
 def init_db():
-    # Połącz się z bazą (utworzy plik jeśli nie istnieje)
+    # Connect to the database (creates the file if it doesn't exist)
     conn = sqlite3.connect("bot_data.db")
     cursor = conn.cursor()
 
-    # Sprawdź czy tabela istnieje
+    # Check if the table exists
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS status_requests (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
