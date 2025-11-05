@@ -1,6 +1,7 @@
 import discord
 import asyncio
 import random
+import os
 from datetime import datetime, timedelta
 from db_utils import (
     get_all_statuses, add_status_request, get_added_statuses_from_user,
@@ -10,13 +11,15 @@ from db_utils import (
     add_permission, remove_permission
 )
 import os
+from is_vedal_online_module import vedal_watch_loop
 
 class MyClient(discord.Client):
     def __init__(self):
         # self_bot=True is required for discord.py-self
         super().__init__(self_bot=True)
 
-        self.target_user_id = 427698599179059202  # <- id for Vedal987 notifications
+        self.target_user_id = int(os.getenv("VEDAL_NOTIFY_USER_ID"))  # <- id for Vedal987 notifications
+        self.debug_channel_id = int(os.getenv("DEBUG_CHANNEL_ID"))  # <- channel id for debug messages
         self.already_notified_today = False
         self.bg_tasks_started = False
         self.status_rotation_interval = {"min": 25, "max": 45}  # random timeout for status in minutes
@@ -29,10 +32,11 @@ class MyClient(discord.Client):
     async def on_ready(self):
         print("Logged on as", self.user)
 
+
         if not self.bg_tasks_started:
             self.bg_tasks_started = True
             asyncio.create_task(self.rotate_status_task())
-            # asyncio.create_task(self.daily_status_task())
+            asyncio.create_task(vedal_watch_loop(self, datetime.now()))
             # vedal_watch_loop is started from main.py
 
     async def daily_status_task(self):
@@ -155,7 +159,7 @@ class MyClient(discord.Client):
                 message.add_reaction("❌")
                 await message.channel.send("## I couldn't find that status among the ones you added.")
 
-        if "ty chuju" in message.content.lower() and len(message.content) < 12 and message.author.id == self.target_user_id:
+        if vedal_reaction(message.content):
             await message.add_reaction("❤️")
 
         if message.content.startswith("!add_status "):
@@ -169,6 +173,7 @@ class MyClient(discord.Client):
 
             # minimum two elements required: [category] [content...]
             if len(parts) < 2:
+                await message.add_reaction("❌")
                 await message.channel.send(
                     "Usage: `!add_status [category] status content`\n"
                     "Example: `!add_status general Hello world!`"
@@ -190,6 +195,7 @@ class MyClient(discord.Client):
             new_status = " ".join(parts[1:]).strip()
 
             if not new_status:
+                await message.add_reaction("❌")
                 await message.channel.send("Provide the status text after the category 🤨")
                 return
 
@@ -380,10 +386,7 @@ class MyClient(discord.Client):
                 approve_status_by_value(status_value, user.id)
                 await reaction.message.channel.send(f"Status '{status_value}' approved by {user}.")
 
-    async def send_discord_message(self, message: str, user_id: int = None):
-        if user_id is None:
-            user_id = self.target_user_id
-
+    async def send_discord_message(self, message: str, user_id: int):
         user = self.get_user(user_id)
         if user is None:
             try:
@@ -397,3 +400,28 @@ class MyClient(discord.Client):
             print("✅ Sent DM:", message)
         except Exception as e:
             print("❌ Failed to send DM:", e)
+
+    async def send_channel_message(self, channel_id: int, message: str):
+        channel = self.get_channel(channel_id)
+        if channel is None:
+            try:
+                channel = await self.fetch_channel(channel_id)
+            except Exception as e:
+                print("Cannot fetch channel:", e)
+                return
+
+        try:
+            await channel.send(message)
+            print("✅ Sent channel message:", message)
+        except Exception as e:
+            print("❌ Failed to send channel message:", e)
+
+def parse_message_content(raw: str) -> str:
+    cleaned = re.sub(r'[^a-zA-Z0-9 ]', '', raw)
+    cleaned = re.sub(r'\s+', ' ', cleaned)
+    return cleaned
+
+def vedal_reaction(raw: str) -> bool:
+    cleaned = parse_message_content(raw).lower()
+    triggers = ["ty chuju", "ty huju"]
+    return cleaned in triggers

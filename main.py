@@ -1,6 +1,5 @@
 import asyncio
 from discord_module import MyClient
-from is_vedal_online_module import vedal_watch_loop
 from db_utils import init_db
 from datetime import datetime
 from cli import start_cli  
@@ -20,7 +19,6 @@ async def main():
     init_db()
     start_cli()  # launch the CLI interface
     async with client:
-        asyncio.create_task(vedal_watch_loop(client, startup_time))
         await client.start(DISCORD_TOKEN)
         
 asyncio.run(main())

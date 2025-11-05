@@ -237,14 +237,14 @@ def get_all_permissions():
     conn.close()
     return rows
 
-def add_permission(user_id: int, label: str, permissions: str, category: str = "general"):
+def add_permission(user_id: int, label: str, permissions: str = "[]"):
     conn = sqlite3.connect("bot_data.db")
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
 
     cursor.execute(
-        "INSERT INTO permissions (user_id, label, permissions, category) VALUES (?, ?, ?, ?)",
-        (user_id, label, permissions, category)
+        "INSERT INTO permissions (user_id, label, permissions) VALUES (?, ?, ?)",
+        (user_id, label, permissions)
     )
 
     conn.commit()
