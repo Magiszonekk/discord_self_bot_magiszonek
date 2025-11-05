@@ -11,53 +11,56 @@ GQL_URL = "https://gql.twitch.tv/gql"
 FRONTEND_CLIENT_ID = "kimne78kx3ncx6brgo4mv6wki5h1ko"  # publiczny client-id frontendu
 STREAM_METADATA_HASH = "1c719a40e481453e5c48d9bb585d971b8b372f8ebb105b17076722264dfa5b3e"
 
-START_HOUR = 20
+START_HOUR = 19
+START_MINUTE = 59
 END_HOUR = 22
-PHASE1_END = 15   # do 20:15 co 20 sec
-PHASE2_END = 30   # do 20:30 co 2 min
-PHASE3_END = 60   # do 21:00 co 5 min
-
-PHASE4_END = 75   # do 21:15 co 1 min
-PHASE5_END = 90   # do 21:30 co 2 min
-# potem co 5 min
-
+END_MINUTE = 0
+PHASES = [{
+    "end_after_min": 15,
+    "check_interval_sec": 20
+}, {
+    "end_after_min": 30,
+    "check_interval_sec": 120
+}, {
+    "end_after_min": 60,
+    "check_interval_sec": 300
+}, {
+    "end_after_min": 75,
+    "check_interval_sec": 60
+}, {
+    "end_after_min": 90,
+    "check_interval_sec": 120
+}]
+LAST_PHASE_INTERVAL_SEC = 300
 # --- UTIL ---
 def in_time_window(now: datetime) -> bool:
-    start = now.replace(hour=START_HOUR, minute=0, second=0, microsecond=0)
-    end = now.replace(hour=END_HOUR, minute=0, second=0, microsecond=0)
+    start = now.replace(hour=START_HOUR, minute=START_MINUTE, second=0, microsecond=0)
+    end = now.replace(hour=END_HOUR, minute=END_MINUTE, second=0, microsecond=0)
     return start <= now < end
 
 def minutes_since_start(now: datetime) -> int:
-    start = now.replace(hour=START_HOUR, minute=0, second=0, microsecond=0)
+    start = now.replace(hour=START_HOUR, minute=START_MINUTE, second=0, microsecond=0)
     diff = now - start
     return diff.seconds // 60
 
-def calc_sleep_seconds(now: datetime) -> int:
+def calc_sleep_seconds(now: datetime) -> int:   
     mins = minutes_since_start(now)
-    if mins < PHASE1_END:
-        return 20         # 20 sec
-    elif mins < PHASE2_END:
-        return 120        # 2 min
-    elif mins < PHASE3_END:
-        return 300        # 5 min
-    elif mins < PHASE4_END:
-        return 60         # 1 min
-    elif mins < PHASE5_END:
-        return 120        # 2 min
-    else:
-        return 300        # 5 min
+    for phase in PHASES:
+        if mins < phase["end_after_min"]:
+            return phase["check_interval_sec"]
+    return LAST_PHASE_INTERVAL_SEC
 
 def seconds_until_next_day_window(now: datetime) -> int:
     tomorrow = now.date() + timedelta(days=1)
     next_start = datetime(
         year=tomorrow.year, month=tomorrow.month, day=tomorrow.day,
-        hour=START_HOUR, minute=0, second=0, microsecond=0
+        hour=START_HOUR, minute=START_MINUTE, second=0, microsecond=0
     )
     return int((next_start - now).total_seconds())
 
 def seconds_until_next_window(now: datetime) -> int:
-    today_start = now.replace(hour=START_HOUR, minute=0, second=0, microsecond=0)
-    today_end = now.replace(hour=END_HOUR, minute=0, second=0, microsecond=0)
+    today_start = now.replace(hour=START_HOUR, minute=START_MINUTE, second=0, microsecond=0)
+    today_end = now.replace(hour=END_HOUR, minute=END_MINUTE, second=0, microsecond=0)
     if now < today_start:
         return int((today_start - now).total_seconds())
     elif now >= today_end:
@@ -70,8 +73,8 @@ def should_skip_today(startup_time: datetime, now: datetime) -> bool:
     if environment != "production":
         return False
     same_day = (startup_time.date() == now.date())
-    started_after_20 = startup_time.hour >= START_HOUR
-    return same_day and started_after_20
+    started_after = startup_time.hour >= START_HOUR and startup_time.minute >= START_MINUTE
+    return same_day and started_after
 
 # --- NIEOFICJALNE SPRAWDZANIE LIVE (aiohttp) ---
 async def is_live_unofficial(session: aiohttp.ClientSession, channel_login: str) -> bool:
