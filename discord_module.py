@@ -11,14 +11,17 @@ from db_utils import (
     add_permission, remove_permission
 )
 import os
-from is_vedal_online_module import vedal_watch_loop
+from is_live import test_eventsub
+from dotenv import load_dotenv
+
+load_dotenv()
 
 class MyClient(discord.Client):
     def __init__(self):
         # self_bot=True is required for discord.py-self
         super().__init__(self_bot=True)
 
-        self.target_user_id = int(os.getenv("VEDAL_NOTIFY_USER_ID"))  # <- id for Vedal987 notifications
+        self.target_user_id = int(os.getenv("BROADCAST_NOTIFY_USER_ID"))  # <- id for Vedal987 notifications
         self.debug_channel_id = int(os.getenv("DEBUG_CHANNEL_ID"))  # <- channel id for debug messages
         self.already_notified_today = False
         self.bg_tasks_started = False
@@ -36,8 +39,10 @@ class MyClient(discord.Client):
         if not self.bg_tasks_started:
             self.bg_tasks_started = True
             asyncio.create_task(self.rotate_status_task())
-            asyncio.create_task(vedal_watch_loop(self, datetime.now()))
-            # vedal_watch_loop is started from main.py
+            await test_eventsub(
+                os.getenv("BOT_CLIENT_ID"),
+                os.getenv("BOT_ACCESS_TOKEN"),
+            )
 
     async def daily_status_task(self):
         while True:

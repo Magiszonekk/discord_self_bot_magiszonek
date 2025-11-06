@@ -1,7 +1,0 @@
-if jjp writes "ty chuju" add a heart reaction
-random status from the list every 25-45 minutes
-!ping -> pong
-!help -> show help
-!add_status -> adds a status idea to the database
-!status_list -> list of approved statuses
-!my_statuses -> list of statuses submitted by a given user

@@ -7,6 +7,7 @@ import time
 from dotenv import load_dotenv
 from db_utils import get_all_permissions, get_all_categories
 import os
+from is_live import get_twitch_user_id
 
 load_dotenv()
 DISCORD_TOKEN = os.getenv("TOKEN")
@@ -20,5 +21,5 @@ async def main():
     start_cli()  # launch the CLI interface
     async with client:
         await client.start(DISCORD_TOKEN)
-        
+
 asyncio.run(main())
