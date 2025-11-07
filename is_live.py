@@ -4,7 +4,7 @@ import json
 import requests
 import os
 
-async def test_eventsub(CLIENT_ID: str, USER_TOKEN: str):
+async def test_eventsub(CLIENT_ID: str, USER_TOKEN: str, client_ref):
     """Minimal test - just prints when Vedal goes live"""
     
     BROADCASTER_ID = get_twitch_user_id(os.getenv("BROADCASTER"))
@@ -46,9 +46,9 @@ async def test_eventsub(CLIENT_ID: str, USER_TOKEN: str):
                 elif msg_type == "notification":
                     # STREAM WENT LIVE!
                     event = data["payload"]["event"]
-                    print(f"🎉🎉🎉 {event['broadcaster_user_login']} IS LIVE! 🎉🎉🎉")
-                    print(f"https://www.twitch.tv/{event['broadcaster_user_login']}")
-                
+                    print(f"🚀 {os.getenv('BROADCASTER')} is LIVE!")
+                    client_ref.send_discord_message(f"https://www.twitch.tv/{event['broadcaster_user_login']}",client_ref.target_user_id)
+
                 # elif msg_type == "session_keepalive":
                     # print("💓 (keepalive)")
 

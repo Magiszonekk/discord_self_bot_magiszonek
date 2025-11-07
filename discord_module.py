@@ -13,6 +13,7 @@ from db_utils import (
 import os
 from is_live import test_eventsub
 from dotenv import load_dotenv
+import re
 
 load_dotenv()
 
@@ -39,10 +40,17 @@ class MyClient(discord.Client):
         if not self.bg_tasks_started:
             self.bg_tasks_started = True
             asyncio.create_task(self.rotate_status_task())
-            await test_eventsub(
-                os.getenv("BOT_CLIENT_ID"),
-                os.getenv("BOT_ACCESS_TOKEN"),
-            )
+            try:
+                asyncio.create_task(
+                    test_eventsub(
+                        os.getenv("BOT_CLIENT_ID"),
+                        os.getenv("BOT_ACCESS_TOKEN"),
+                        self
+                    )
+                )
+                print("✅ EventSub task started")
+            except Exception as e:
+                print(f"❌ EventSub failed: {e}")
 
     async def daily_status_task(self):
         while True:
@@ -164,7 +172,7 @@ class MyClient(discord.Client):
                 message.add_reaction("❌")
                 await message.channel.send("## I couldn't find that status among the ones you added.")
 
-        if vedal_reaction(message.content):
+        if vedal_reaction(message.content) and message.author.id == os.getenv("BROADCAST_NOTIFY_USER_ID"):
             await message.add_reaction("❤️")
 
         if message.content.startswith("!add_status "):
