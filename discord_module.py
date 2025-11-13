@@ -35,8 +35,6 @@ class MyClient(discord.Client):
 
     async def on_ready(self):
         print("Logged on as", self.user)
-
-
         if not self.bg_tasks_started:
             self.bg_tasks_started = True
             asyncio.create_task(self.rotate_status_task())
@@ -356,7 +354,7 @@ class MyClient(discord.Client):
                 "- **!status_list <category>**: Shows the list of statuses in the specified category\n\n"
                 "- **!my_status_list**: Shows the statuses you submitted\n"
                 "- **!my_status_list <category>**: Shows the statuses you submitted in the specified category\n\n"
-                "- **!add_status <status>**: Adds a new status to the suggestion pool\n"
+                "- **!add_status <category> <status>**: Adds a new status to the suggestion pool\n"
                 "- **!remove_status <id>**: Removes a status from the suggestion pool\n"
 
                 "## Categories:\n"
