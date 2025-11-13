@@ -98,7 +98,7 @@ class MyClient(discord.Client):
             
         # for debugging purposes
         # if message.author.id == self.user.id:
-        print(f"Message from {message.author} ({message.author.id}): {message.content}")
+        # print(f"Message from {message.author} ({message.author.id}): {message.content}")
 
         if message.content == "!ping":
             await message.channel.send("pong")

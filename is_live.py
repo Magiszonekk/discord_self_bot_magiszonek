@@ -4,6 +4,8 @@ import json
 import requests
 import os
 
+from logging_utils import log
+
 async def test_eventsub(CLIENT_ID: str, USER_TOKEN: str, client_ref):
     
     BROADCASTER_ID = get_twitch_user_id(os.getenv("BROADCASTER"))
@@ -11,7 +13,7 @@ async def test_eventsub(CLIENT_ID: str, USER_TOKEN: str, client_ref):
     # Connect to WebSocket
     async with aiohttp.ClientSession() as session:
         async with session.ws_connect("wss://eventsub.wss.twitch.tv/ws") as ws:
-            print("🔌 Connected! Waiting for messages...")
+            log("🔌 Connected! Waiting for messages...", True)
             
             async for msg in ws:
                 data = json.loads(msg.data)
@@ -20,7 +22,7 @@ async def test_eventsub(CLIENT_ID: str, USER_TOKEN: str, client_ref):
                 if msg_type == "session_welcome":
                     # Got session ID - now subscribe
                     session_id = data["payload"]["session"]["id"]
-                    print(f"✅ Session ID: {session_id}")
+                    log(f"✅ Session ID: {session_id}", True)
                     
                     # Subscribe to stream.online
                     sub_url = "https://api.twitch.tv/helix/eventsub/subscriptions"
@@ -38,14 +40,14 @@ async def test_eventsub(CLIENT_ID: str, USER_TOKEN: str, client_ref):
                     
                     async with session.post(sub_url, headers=headers, json=payload) as resp:
                         if resp.status == 202:
-                            print(f"🎯 Subscribed! Waiting for {os.getenv('BROADCASTER')} to go live...")
+                            log(f"🎯 Subscribed! Waiting for {os.getenv('BROADCASTER')} to go live...", True)
                         else:
-                            print(f"❌ Failed: {await resp.text()}")
+                            log(f"❌ Failed: {await resp.text()}", "error", True)
                 
                 elif msg_type == "notification":
                     # STREAM WENT LIVE!
                     event = data["payload"]["event"]
-                    print(f"🚀 {os.getenv('BROADCASTER')} is LIVE!")
+                    log(f"🚀 {os.getenv('BROADCASTER')} is LIVE!", True)
                     client_ref.send_discord_message(f"https://www.twitch.tv/{event['broadcaster_user_login']}",int(client_ref.target_user_id))
 
                 # elif msg_type == "session_keepalive":
@@ -65,5 +67,5 @@ def get_twitch_user_id(username):
         user = data["data"][0]
         return user["id"]
     else:
-        print("User not found!")
+        log("User not found!", "warning", True)
         return None
