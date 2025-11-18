@@ -10,10 +10,10 @@ from db_utils import (
     remove_status, remove_category, add_category, does_status_exist, get_all_permissions,
     add_permission, remove_permission
 )
-import os
 from is_live import test_eventsub
 from dotenv import load_dotenv
 import re
+from logging_utils import log
 
 load_dotenv()
 
@@ -32,6 +32,33 @@ class MyClient(discord.Client):
         self.statuses = get_approved_statuses()
         self.rotate_status = True
         self.vedal_loop = True
+        self.command_list = [
+            "!help",
+            "!ping",
+            "!change_status",
+            "!my_status_list",
+            "!my_status_list",
+            "!add_status",
+            "!remove_status",
+            "!status_list",
+            "!category_list",
+            "!add_category",
+            "!remove_category",
+            "!permissions_list",
+            "!add_permission",
+            "!remove_permission",
+            "!rotate_status",
+            "!vedal_loop"
+        ]
+
+    def log_command_usage(self, command_name: str, author, success: bool, detail: str = "") -> None:
+        """
+        Helper for consistent command logging.
+        """
+        user_display = f"{author} ({getattr(author, 'id', 'unknown')})"
+        outcome = "SUCCESS" if success else "FAILED"
+        suffix = f" | {detail}" if detail else ""
+        log(f"[COMMAND] {command_name} by {user_display}: {outcome}{suffix}", True)
 
     async def on_ready(self):
         print("Logged on as", self.user)
@@ -92,18 +119,31 @@ class MyClient(discord.Client):
             await asyncio.sleep(sleep_seconds)
 
     async def on_message(self, message):
+        content = message.content.strip()
+        permitted_user_ids = [self.user.id, *[u["user_id"] for u in self.users_with_permissions]]
+
         # ignore messages from people without permissions
-        if message.author.id not in [self.user.id, *[u["user_id"] for u in self.users_with_permissions]]:
+        if message.author.id not in permitted_user_ids:
+            if content.startswith(tuple(self.command_list)):
+                command_name = content.split()[0]
+                self.log_command_usage(command_name, message.author, False, "Insufficient permissions")
             return
             
         # for debugging purposes
         # if message.author.id == self.user.id:
         # print(f"Message from {message.author} ({message.author.id}): {message.content}")
 
-        if message.content == "!ping":
-            await message.channel.send("pong")
+        if content == "!ping":
+            command_name = "!ping"
+            try:
+                await message.channel.send("pong")
+                self.log_command_usage(command_name, message.author, True)
+            except Exception as e:
+                self.log_command_usage(command_name, message.author, False, f"error={e}")
+            return
 
-        if message.content == "!change_status":
+        if content == "!change_status":
+            command_name = "!change_status"
             new_status = random.choice(self.statuses)
             print(f"[{datetime.now():%H:%M}] Manual status change to: {new_status['status']}")
 
@@ -114,12 +154,17 @@ class MyClient(discord.Client):
                     edit_settings=True
                 )
                 await message.add_reaction("✅")
+                self.log_command_usage(command_name, message.author, True, f"status='{new_status['status']}'")
             except Exception as e:
                 print("change_presence error (manual):", e)
                 await message.add_reaction("❌")
+                self.log_command_usage(command_name, message.author, False, f"error={e}")
+            return
 
-        if message.content == "!my_status_list":
+        if content == "!my_status_list":
+            command_name = "!my_status_list"
             user_statuses = get_added_statuses_from_user(message.author.id)
+            detail = ""
 
             if user_statuses:
                 status_list = "\n".join(
@@ -128,21 +173,23 @@ class MyClient(discord.Client):
                 )
 
                 if len(status_list) > self.discord_message_length_limit:
-                    status_list_categories = set()
-                    for s in user_statuses:
-                        category = s['category']
-                        status_list_categories.add(category)
+                    status_list_categories = {s['category'] for s in user_statuses}
                     await message.channel.send("## You have too many added statuses to display, but you can specify a particular category (!my_statuses category).\nHere are your options:")
                     await message.channel.send(", ".join(status_list_categories))
-
+                    detail = f"{len(user_statuses)} statuses (truncated)"
                 else:
-                    print(status_list)
                     await message.channel.send(f"## Your added statuses:\n{status_list}")
+                    detail = f"{len(user_statuses)} statuses"
             else:
                 await message.channel.send("## You haven't added any statuses yet.")
+                detail = "no statuses"
 
-        if message.content.startswith("!my_status_list "):
-            category = message.content[len("!my_status_list "):].strip()
+            self.log_command_usage(command_name, message.author, True, detail)
+            return
+
+        if content.startswith("!my_status_list "):
+            command_name = "!my_status_list"
+            category = content[len("!my_status_list "):].strip()
             user_statuses = get_status_by_category_and_user(category, message.author.id)
 
             if user_statuses:
@@ -151,31 +198,34 @@ class MyClient(discord.Client):
                     for s in user_statuses
                 )
                 await message.channel.send(f"## Your added statuses in the '{category}' category:\n{status_list}")
+                detail = f"{len(user_statuses)} statuses in {category}"
             else:
                 await message.channel.send(f"## You haven't added any statuses in the '{category}' category yet.")
+                detail = f"no statuses in {category}"
 
-        if message.content.startswith("!remove_status "):
-            status_to_remove = message.content[len("!remove_status "):].strip()
+            self.log_command_usage(command_name, message.author, True, detail)
+            return
+
+        if content.startswith("!remove_status "):
+            command_name = "!remove_status"
+            status_to_remove = content[len("!remove_status "):].strip()
             user_statuses = get_added_statuses_from_user(message.author.id)
             user_status_values = [s['id'] for s in user_statuses]
 
             if status_to_remove not in user_status_values:
                 await message.channel.send("## You can't remove a status you didn't add.")
+                self.log_command_usage(command_name, message.author, False, f"id={status_to_remove} not owned")
                 return
 
-            if status_to_remove in user_status_values:
-                remove_status(status_to_remove)
-                await message.add_reaction("✅")
-            else:
-                message.add_reaction("❌")
-                await message.channel.send("## I couldn't find that status among the ones you added.")
+            remove_status(status_to_remove)
+            await message.add_reaction("✅")
+            self.log_command_usage(command_name, message.author, True, f"id={status_to_remove}")
+            return
 
-        if vedal_reaction(message.content) and message.author.id == os.getenv("BROADCAST_NOTIFY_USER_ID"):
-            await message.add_reaction("❤️")
-
-        if message.content.startswith("!add_status "):
+        if content.startswith("!add_status "):
+            command_name = "!add_status"
             # remove the "!add_status " prefix
-            raw_args = message.content[len("!add_status "):].strip()
+            raw_args = content[len("!add_status "):].strip()
 
             # split by spaces
             parts = raw_args.split()
@@ -189,10 +239,10 @@ class MyClient(discord.Client):
                     "Usage: `!add_status [category] status content`\n"
                     "Example: `!add_status general Hello world!`"
                 )
+                self.log_command_usage(command_name, message.author, False, "Missing category/content")
                 return
 
             categories = get_all_categories()
-
             category = parts[0]
 
             if category not in [c['label'] for c in categories]:
@@ -201,6 +251,7 @@ class MyClient(discord.Client):
                     f"Category '{category}' does not exist.\nAvailable categories:\n- "
                     + "\n- ".join(c['label'] for c in categories)
                 )
+                self.log_command_usage(command_name, message.author, False, f"Category '{category}' missing")
                 return
 
             new_status = " ".join(parts[1:]).strip()
@@ -208,12 +259,13 @@ class MyClient(discord.Client):
             if not new_status:
                 await message.add_reaction("❌")
                 await message.channel.send("Provide the status text after the category 🤨")
+                self.log_command_usage(command_name, message.author, False, "Empty status content")
                 return
-
 
             if does_status_exist(new_status):
                 await message.add_reaction("❌")
                 await message.channel.send("That status already exists")
+                self.log_command_usage(command_name, message.author, False, "Status duplicate")
                 return
 
             add_status_request(
@@ -224,9 +276,12 @@ class MyClient(discord.Client):
             )
 
             await message.add_reaction("✅")
+            self.log_command_usage(command_name, message.author, True, f"category={category}")
+            return
 
-        if message.content.startswith("!status_list "):
-            category = message.content[len("!status_list "):].strip()
+        if content.startswith("!status_list "):
+            command_name = "!status_list"
+            category = content[len("!status_list "):].strip()
             statuses_in_category = get_statuses_by_category(category)
 
             if statuses_in_category:
@@ -235,25 +290,35 @@ class MyClient(discord.Client):
                     for s in statuses_in_category
                 )
 
-
                 if len(status_list) > self.discord_message_length_limit:
                     await message.channel.send("There are too many statuses in this category to display.")
+                    detail = f"{len(statuses_in_category)} statuses (too long) in {category}"
                 else:
                     await message.channel.send(f"## Statuses in the '{category}' category:\n{status_list}")
+                    detail = f"{len(statuses_in_category)} statuses in {category}"
             else:
                 await message.channel.send(f"## No statuses in the '{category}' category.")
+                detail = f"0 statuses in {category}"
 
-        if message.content == "!category_list":
+            self.log_command_usage(command_name, message.author, True, detail)
+            return
+
+        if content == "!category_list":
+            command_name = "!category_list"
             categories = get_all_categories()
             category_list = "\n- ".join(c['label'] for c in categories)
-            category_list = "- " + category_list
+            category_list = "- " + category_list if category_list else "No categories defined."
             await message.channel.send(f"## Available status categories:\n{category_list}")
+            self.log_command_usage(command_name, message.author, True, f"{len(categories)} categories")
+            return
 
-        if message.content.startswith("!add_category "):
-            new_category = message.content[len("!add_category "):].strip()
+        if content.startswith("!add_category "):
+            command_name = "!add_category"
+            new_category = content[len("!add_category "):].strip()
 
             if " " in new_category:
                 await message.channel.send("The category name cannot contain spaces.")
+                self.log_command_usage(command_name, message.author, False, "Contains spaces")
                 return
 
             if new_category:
@@ -262,29 +327,39 @@ class MyClient(discord.Client):
                     label=new_category
                 )
                 await message.add_reaction("✅")
+                self.log_command_usage(command_name, message.author, True, f"category={new_category}")
             else:
                 await message.channel.send("You didn't provide a category name to add.")
+                self.log_command_usage(command_name, message.author, False, "Missing category name")
+            return
 
-        if message.content.startswith("!remove_category "):
+        if content.startswith("!remove_category "):
+            command_name = "!remove_category"
             categories = get_all_categories()
             categories_labels = [c['label'] for c in categories]
-            category_to_remove = message.content[len("!remove_category "):].strip()
+            category_to_remove = content[len("!remove_category "):].strip()
             if category_to_remove:
                 if category_to_remove in categories_labels:
                     created_by_user_id = next(c['created_by_user_id'] for c in categories if c['label'] == category_to_remove)
                     if created_by_user_id != message.author.id:
-                        await message.channel.send(f"You can only delete categories that you added yourself.")
+                        await message.channel.send("You can only delete categories that you added yourself.")
+                        self.log_command_usage(command_name, message.author, False, f"{category_to_remove} owned by another user")
                         return
-                    else:
-                        remove_category(category_to_remove)
-                        await message.add_reaction("✅")
+                    remove_category(category_to_remove)
+                    await message.add_reaction("✅")
+                    self.log_command_usage(command_name, message.author, True, f"category={category_to_remove}")
                 else:
                     await message.channel.send(f"Category not found: {category_to_remove}")
+                    self.log_command_usage(command_name, message.author, False, f"{category_to_remove} missing")
             else:
                 await message.channel.send("You didn't provide a category name to remove.")
+                self.log_command_usage(command_name, message.author, False, "Missing category name")
+            return
 
-        if message.content == "!permissions_list":
+        if content == "!permissions_list":
+            command_name = "!permissions_list"
             if message.author.id != self.user.id:
+                self.log_command_usage(command_name, message.author, False, "Admin only")
                 return
             permissions = get_all_permissions()
             permission_list = "\n".join(
@@ -292,57 +367,80 @@ class MyClient(discord.Client):
                 for p in permissions
             )
             await message.channel.send(f"## List of users with permissions:\n{permission_list}")
+            self.log_command_usage(command_name, message.author, True, f"{len(permissions)} entries")
+            return
 
-        if message.content.startswith("!add_permission "):
+        if content.startswith("!add_permission "):
+            command_name = "!add_permission"
             if message.author.id != self.user.id:
+                self.log_command_usage(command_name, message.author, False, "Admin only")
                 return
-            parts = message.content[len("!add_permission "):].strip().split()
+            parts = content[len("!add_permission "):].strip().split()
             if len(parts) < 2:
                 await message.channel.send("Usage: `!add_permission <user_id> <label>`")
+                self.log_command_usage(command_name, message.author, False, "Missing args")
                 return
 
             try:
                 user_id = int(parts[0])
             except ValueError:
                 await message.channel.send("Invalid user_id. It must be a number.")
+                self.log_command_usage(command_name, message.author, False, "Invalid user_id")
                 return
 
             label = " ".join(parts[1:]).strip()
             add_permission(user_id, label)
             await message.add_reaction("✅")
+            self.log_command_usage(command_name, message.author, True, f"user_id={user_id}")
+            return
 
-        if message.content.startswith("!remove_permission "):
+        if content.startswith("!remove_permission "):
+            command_name = "!remove_permission"
             if message.author.id != self.user.id:
+                self.log_command_usage(command_name, message.author, False, "Admin only")
                 return
-            parts = message.content[len("!remove_permission "):].strip().split()
+            parts = content[len("!remove_permission "):].strip().split()
             if len(parts) < 1:
                 await message.channel.send("Usage: `!remove_permission <user_id>`")
+                self.log_command_usage(command_name, message.author, False, "Missing user_id")
                 return
 
             try:
                 user_id = int(parts[0])
             except ValueError:
                 await message.channel.send("Invalid user_id. It must be a number.")
+                self.log_command_usage(command_name, message.author, False, "Invalid user_id")
                 return
 
             remove_permission(user_id)
             await message.add_reaction("✅")
+            self.log_command_usage(command_name, message.author, True, f"user_id={user_id}")
+            return
 
-        if message.content == "!rotate_status":
+        if content == "!rotate_status":
+            command_name = "!rotate_status"
             if message.author.id != self.user.id:
+                self.log_command_usage(command_name, message.author, False, "Admin only")
                 return
             self.rotate_status = not self.rotate_status
             status_text = "enabled" if self.rotate_status else "disabled"
             await message.channel.send(f"Automatic status rotation is now {status_text}.")
+            self.log_command_usage(command_name, message.author, True, status_text)
+            return
 
-        if message.content == "!vedal_loop":
+        if content == "!vedal_loop":
+            command_name = "!vedal_loop"
             if message.author.id != self.user.id:
+                self.log_command_usage(command_name, message.author, False, "Admin only")
                 return
             self.vedal_loop = not self.vedal_loop
             status_text = "enabled" if self.vedal_loop else "disabled"
             await message.channel.send(f"Vedal watch loop is now {status_text}.")
+            self.log_command_usage(command_name, message.author, True, status_text)
+            return
 
-        if message.content == "!help":
+        if content == "!help":
+            command_name = "!help"
             help_text = (
                 "# Commands list:\n"
                 "## General:\n"
@@ -365,9 +463,12 @@ class MyClient(discord.Client):
                 "## URL:\n"
                 "- [github repo](https://github.com/Magiszonekk/discord_self_bot_magiszonek)"
             )
-            await message.channel.send(help_text,suppress_embeds=True)
+            await message.channel.send(help_text, suppress_embeds=True)
+            self.log_command_usage(command_name, message.author, True)
+            return
 
-        if message.content == "!help 2":
+        if content == "!help 2":
+            command_name = "!help 2"
             help_text = (
                 "# Admin commands:\n"
                 "## General:\n"
@@ -382,7 +483,12 @@ class MyClient(discord.Client):
                 "## URL:\n"
                 "- [github repo](https://github.com/Magiszonekk/discord_self_bot_magiszonek)"
             )
-            await message.channel.send(help_text,suppress_embeds=True)
+            await message.channel.send(help_text, suppress_embeds=True)
+            self.log_command_usage(command_name, message.author, True)
+            return
+
+        if vedal_reaction(content) and message.author.id == self.target_user_id:
+            await message.add_reaction("❤️")
 
     async def on_reaction_add(self, reaction, user):
         if user.id != self.user.id:
@@ -403,14 +509,14 @@ class MyClient(discord.Client):
             try:
                 user = await self.fetch_user(user_id)
             except Exception as e:
-                print("Cannot fetch user:", e)
+                log(f"Cannot fetch user {user_id}: {e}", True, "ERROR")
                 return
 
         try:
             await user.send(message)
-            print("✅ Sent DM:", message)
+            log(f"✅ Sent DM to {user_id}: {message}", True)
         except Exception as e:
-            print("❌ Failed to send DM:", e)
+            log(f"❌ Failed to send DM to {user_id}: {e}", True, "ERROR")
 
     async def send_channel_message(self, channel_id: int, message: str):
         channel = self.get_channel(channel_id)
@@ -418,14 +524,14 @@ class MyClient(discord.Client):
             try:
                 channel = await self.fetch_channel(channel_id)
             except Exception as e:
-                print("Cannot fetch channel:", e)
+                log(f"Cannot fetch channel {channel_id}: {e}", True, "ERROR")
                 return
 
         try:
             await channel.send(message)
-            print("✅ Sent channel message:", message)
+            log(f"✅ Sent channel message to {channel_id}: {message}", True)
         except Exception as e:
-            print("❌ Failed to send channel message:", e)
+            log(f"❌ Failed to send channel message to {channel_id}: {e}", True, "ERROR")
 
 def parse_message_content(raw: str) -> str:
     cleaned = re.sub(r'[^a-zA-Z0-9 ]', '', raw)
