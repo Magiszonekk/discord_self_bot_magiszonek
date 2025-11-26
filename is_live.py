@@ -1,3 +1,4 @@
+import time
 import asyncio
 import aiohttp
 import json
@@ -19,19 +20,32 @@ async def test_eventsub(CLIENT_ID: str, USER_TOKEN: str, client_ref):
     current_url = BASE_WS_URL
     use_reconnect_once = False  # flaga czy następne połączenie ma użyć reconnect_url
 
+    # ile sekund czekamy maksymalnie na jakąkolwiek wiadomość (welcome/keepalive/notification)
+    RECEIVE_TIMEOUT = 25  # dostosuj do realnego interwału keepalive od Twitcha
+
     async with aiohttp.ClientSession() as session:
         while True:
             log(f"🔌 Connecting to {current_url}", True)
 
             try:
                 async with session.ws_connect(current_url) as ws:
-                    # jeśli użyliśmy reconnect_url -> po udanym handshake
-                    # wracamy do BASE_WS_URL na przyszłość
                     if use_reconnect_once:
                         current_url = BASE_WS_URL
                         use_reconnect_once = False
 
-                    async for msg in ws:
+                    while True:
+                        try:
+                            msg = await ws.receive(timeout=RECEIVE_TIMEOUT)
+                        except asyncio.TimeoutError:
+                            # 👉 tu jest Twój brak heartbeatów
+                            log(
+                                f"⏰ Brak wiadomości (keepalive / notification) przez {RECEIVE_TIMEOUT}s – zamykam WS i robię reconnect",
+                                True,
+                                "warning",
+                            )
+                            await ws.close()
+                            break  # wychodzimy z while True (WS) → przechodzimy do reconnect w while zewnętrznym
+
                         if msg.type == aiohttp.WSMsgType.TEXT:
                             try:
                                 data = json.loads(msg.data)
@@ -50,8 +64,6 @@ async def test_eventsub(CLIENT_ID: str, USER_TOKEN: str, client_ref):
                                 session_id = data["payload"]["session"]["id"]
                                 log(f"✅ Session ID: {session_id}", True)
 
-                                # SUBSKRYBUJEMY TYLKO PRZY PIERWSZYM WELCOME DLA SESJI
-                                # (opcjonalnie możesz tu dodać jakąś ochronę przed duplikatami)
                                 sub_url = "https://api.twitch.tv/helix/eventsub/subscriptions"
                                 headers = {
                                     "Client-Id": CLIENT_ID,
@@ -84,10 +96,11 @@ async def test_eventsub(CLIENT_ID: str, USER_TOKEN: str, client_ref):
                                 reconnect_url = data["payload"]["session"]["reconnect_url"]
                                 log(f"🔁 session_reconnect -> {reconnect_url}", True, "warning")
 
-                                # UŻYJ reconnect_url TYLKO RAZ
                                 current_url = reconnect_url
                                 use_reconnect_once = True
-                                break  # przerwij pętlę WS, przejdź do kolejnego while True (nowe połączenie)
+                                # ważne: przerwij bieżące połączenie, żeby przejść do nowego
+                                await ws.close()
+                                break
 
                             elif msg_type == "notification":
                                 event = data["payload"]["event"]
@@ -100,8 +113,6 @@ async def test_eventsub(CLIENT_ID: str, USER_TOKEN: str, client_ref):
                                     f"https://www.twitch.tv/{event['broadcaster_user_login']}",
                                     int(client_ref.target_user_id),
                                 )
-                                # jeśli async:
-                                # await client_ref.send_discord_message(...)
 
                             else:
                                 log(f"🤔 unknown msg_type: {msg_type}", True)
@@ -109,7 +120,7 @@ async def test_eventsub(CLIENT_ID: str, USER_TOKEN: str, client_ref):
                         elif msg.type == aiohttp.WSMsgType.ERROR:
                             log(f"💥 WS error: {ws.exception()}", True, "error")
                             break
-                        elif msg.type == aiohttp.WSMsgType.CLOSED:
+                        elif msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.CLOSING):
                             log(f"🔌 WS closed with code {ws.close_code}", True, "warning")
                             break
 
@@ -117,11 +128,9 @@ async def test_eventsub(CLIENT_ID: str, USER_TOKEN: str, client_ref):
                 await asyncio.sleep(3)
 
             except aiohttp.WSServerHandshakeError as e:
-                # tu widzisz 429
                 log(f"💣 Handshake error: {repr(e)}", True, "error")
 
                 if e.status == 429:
-                    # za dużo prób / reconnect_url martwy -> odpuść ten URL
                     log("⏳ 429 from Twitch – odczekuję 60s i wracam do BASE_WS_URL", True, "warning")
                     current_url = BASE_WS_URL
                     use_reconnect_once = False
@@ -137,13 +146,13 @@ async def test_eventsub(CLIENT_ID: str, USER_TOKEN: str, client_ref):
 def get_twitch_user_id(username):
     url = f"https://api.twitch.tv/helix/users?login={username}"
     headers = {
-        "Client-Id": os.getenv("BOT_CLIENT_ID"),  # public client
-        "Authorization": "Bearer " + os.getenv("BOT_ACCESS_TOKEN")  # or use your token
+        "Client-Id": os.getenv("BOT_CLIENT_ID"),
+        "Authorization": "Bearer " + os.getenv("BOT_ACCESS_TOKEN"),
     }
-    
+
     response = requests.get(url, headers=headers)
     data = response.json()
-    
+
     if data.get("data"):
         user = data["data"][0]
         return user["id"]

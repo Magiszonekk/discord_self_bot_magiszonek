@@ -1,3 +1,4 @@
+from email import message
 import discord
 import asyncio
 import random
@@ -14,6 +15,7 @@ from is_live import test_eventsub
 from dotenv import load_dotenv
 import re
 from logging_utils import log
+from logging_utils import logs_message_handler
 
 load_dotenv()
 
@@ -48,7 +50,7 @@ class MyClient(discord.Client):
             "!add_permission",
             "!remove_permission",
             "!rotate_status",
-            "!vedal_loop"
+            "!vedal_loop",
         ]
 
     def log_command_usage(self, command_name: str, author, success: bool, detail: str = "") -> None:
@@ -480,6 +482,10 @@ class MyClient(discord.Client):
                 "- **!add_permission <user_id> <label>**: Adds a permission for a user\n"
                 "- **!remove_permission <user_id>**: Removes a user's permission\n\n"
 
+                "## Logs:\n"
+                "- **!logs**: Shows the last 10 lines of the log file\n"
+                "- **!logs <day> <month> <hour> <minute> [second]**: Shows 10 log lines closest to the specified date and time\n\n"
+
                 "## URL:\n"
                 "- [github repo](https://github.com/Magiszonekk/discord_self_bot_magiszonek)"
             )
@@ -487,6 +493,11 @@ class MyClient(discord.Client):
             self.log_command_usage(command_name, message.author, True)
             return
 
+        if content.startswith("!logs"):
+            await logs_message_handler(message, self)
+            return                
+                
+                
         if vedal_reaction(content) and message.author.id == self.target_user_id:
             await message.add_reaction("❤️")
 
