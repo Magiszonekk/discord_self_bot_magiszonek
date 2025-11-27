@@ -3,9 +3,9 @@ import discord
 import asyncio
 import random
 import os
-from datetime import datetime, timedelta
+from datetime import datetime
 from db_utils import (
-    get_all_statuses, add_status_request, get_added_statuses_from_user,
+    add_status_request, get_added_statuses_from_user,
     get_all_permissions, approve_status_by_value, get_approved_statuses,
     get_status_by_category_and_user, get_statuses_by_category, get_all_categories,
     remove_status, remove_category, add_category, does_status_exist, get_all_permissions,
@@ -78,31 +78,6 @@ class MyClient(discord.Client):
                 print("✅ EventSub task started")
             except Exception as e:
                 print(f"❌ EventSub failed: {e}")
-
-    async def daily_status_task(self):
-        while True:
-            now = datetime.now()
-            target = now.replace(hour=8, minute=0, second=0, microsecond=0)
-
-            if now >= target:
-                target += timedelta(days=1)
-
-            wait_seconds = (target - now).total_seconds()
-            print(f"Waiting {wait_seconds/3600:.2f}h until 8:00...")
-
-            await asyncio.sleep(wait_seconds)
-
-            new_status = random.choice(self.statuses)
-            print(f"[{datetime.now():%H:%M}] Changing status to: {new_status['status']}")
-
-            try:
-                await self.change_presence(
-                    activity=discord.CustomActivity(new_status['status']),
-                    status=discord.Status.online,
-                    edit_settings=True
-                )
-            except Exception as e:
-                print("change_presence error (daily):", e)
 
     async def rotate_status_task(self):
         while self.rotate_status:
@@ -508,11 +483,25 @@ class MyClient(discord.Client):
         print(f"Reaction from {user}: {reaction.emoji} on message {reaction.message.id}")
 
         if str(reaction.emoji) == "👍":
-            status_content = reaction.message.content
-            if status_content.startswith("!add_status "):
-                status_value = status_content[len("!add_status "):].strip()
+            content = reaction.message.content
+
+            if content.startswith("!add_status "):
+                parts = content.split(maxsplit=2)
+                print(len(parts))
+                if len(parts) < 3:
+                    await reaction.message.channel.send("❌ Brakuje kategorii lub statusu.")
+                    return
+                
+                print(f"Parts: {parts}")
+                category = parts[1].strip()
+                status_value = parts[2].strip()
+
                 approve_status_by_value(status_value, user.id)
-                await reaction.message.channel.send(f"Status '{status_value}' approved by {user}.")
+
+                await reaction.message.channel.send(
+                    f"👍 Status **'{status_value}'** z kategorii **'{category}'** został zatwierdzony przez {user}."
+                )
+
 
     async def send_discord_message(self, message: str, user_id: int):
         user = self.get_user(user_id)

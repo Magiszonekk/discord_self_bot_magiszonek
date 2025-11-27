@@ -1,5 +1,4 @@
 import sqlite3
-from datetime import datetime
 
 conn = sqlite3.connect("bot_data.db")
 cursor = conn.cursor()

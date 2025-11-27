@@ -1,114 +1,139 @@
 # Discord Status Rotations
 
-Lightweight Discord self-bot that rotates custom statuses, curates crowd-sourced status suggestions, and optionally watches a Twitch broadcaster for live notifications. Persistence is handled with SQLite, and a handful of Discord commands allow trusted users to manage categories, submissions, and permissions without touching the database.
+Discord self-bot that rotates curated custom statuses, manages community submissions, and pings you the moment a tracked Twitch broadcaster goes live. SQLite keeps the state, `discord.py-self` powers the client, and a single process handles CLI input, Discord commands, and Twitch EventSub events.
 
-> ⚠️ **Heads-up:** Discord self-bots violate Discord's Terms of Service. Run this code only on accounts you are willing to lose and at your own risk.
+> ⚠️ Discord self-bots violate Discord's Terms of Service. Run this only on accounts you accept losing and preferably on a throwaway profile.
 
-## Features
-- Automatic rotation of approved custom statuses on a configurable random interval.
-- Status suggestion workflow with categories, per-user tracking, and emoji-based approvals.
-- Permission system so only trusted users can submit and curate statuses.
-- Minimal CLI helper (clearing the console) that runs alongside the async Discord client.
-- Twitch EventSub listener that prints when the configured broadcaster goes live.
+## What you get
+- Automatic rotation of approved statuses every 25–45 minutes with manual override and enable/disable switches.
+- Status submission workflow with categories, per-user lists, and owner approvals driven by a 👍 reaction on `!add_status` messages.
+- Permission gates so only trusted IDs can interact with the workflow, plus owner-only admin and logging commands.
+- Background CLI thread for simple console housekeeping (`cls` / `csl`) without interrupting the asyncio loop.
+- Twitch EventSub listener that reconnects automatically and DMs the configured Discord user with the live stream URL.
+- Log aggregation into `logs/bot.log` with an in-Discord `!logs` command for quick forensics.
+- Helpers for DMing or posting updates to channels, ready for custom automation beyond Twitch alerts.
 
 ## Project layout
-- `main.py` – application entry point; loads environment, initializes the database, starts the CLI, and runs the Discord client.
-- `discord_module.py` – `discord.py-self` client with background tasks, command handlers, reactions, and helper utilities.
-- `db_utils.py` – SQLite helpers for statuses, categories, and permission records (stored in `bot_data.db`).
-- `is_live.py` – Twitch EventSub websocket client plus REST helper to resolve user IDs.
-- `cli.py` – background thread with a simple `cls` command for quick console cleanup.
-- `.env` – runtime secrets and IDs (not committed).
+- `main.py` – entry point; loads `.env`, initializes the database, starts the CLI, and runs the Discord client.
+- `discord_module.py` – `discord.py-self` client with command handlers, rotation logic, Twitch glue, logging hooks, and DM/channel helpers.
+- `db_utils.py` – SQLite helpers for statuses (with `category` and `approved_by_user_id`), categories, and permissions stored in `bot_data.db`.
+- `is_live.py` – Twitch EventSub websocket client plus REST helper to look up broadcaster IDs.
+- `logging_utils.py` – file logger, log-tail helper, and Discord command handler for serving log slices.
+- `cli.py` – daemon thread that prints `CLI ready 😎` and accepts `cls` to clear your shell.
+- `bot_data.db` – default SQLite database; delete it to start fresh.
+- `.env` – local environment variables (ignored by Git).
 
 ## Requirements
-- Python 3.10+ (tested with CPython).
-- A Discord account token that you control (self-bot usage risk noted above).
-- Twitch Application credentials if you plan to use the EventSub watcher.
-- `pip` and `virtualenv` tooling.
+- Python 3.10+ (CPython tested).
+- `pip`, `virtualenv`, and SQLite (bundled with Python).
+- A Discord user token you control (see ToS warning).
+- Twitch Application client ID + OAuth token if you use the go-live watcher.
 
 ## Quick start
-1. **Clone the repo** and open the project directory.
-2. **Create and activate a virtual environment** (matches `venv.txt`):
-   ```powershell
-   python -m venv venv
-   venv\Scripts\activate
+1. **Clone and enter the repo.**
+2. **Create a virtual environment and install dependencies:**
+   ```bash
+   python -m venv .venv
+   source .venv/bin/activate  # Windows: .venv\Scripts\activate
    pip install -r requirements.txt
    ```
-3. **Create a `.env` file** in the project root (example below) and fill in the values for your setup.
+3. **Create `.env`** with the variables below (only keep the ones you need).
 4. **Run the bot**:
-   ```powershell
+   ```bash
    python main.py
    ```
-   The CLI thread prints `CLI ready ...` and accepts `cls` to clear your console while the Discord client runs in the foreground.
+   The CLI thread announces `CLI ready 😎`—type `cls` or `csl` in the terminal to clear the screen while the bot keeps running.
 
 ### Environment variables
 ```dotenv
 TOKEN="discord-user-token"
-DEBUG_CHANNEL_ID="123456789012345678"
 BROADCAST_NOTIFY_USER_ID="123456789012345678"
+DEBUG_CHANNEL_ID="123456789012345678"
 ENVIRONMENT="development"
-BOT_ACCESS_TOKEN="twitch-oauth-access-token"
-BOT_CLIENT_ID="twitch-application-client-id"
-BROADCASTER="twitch-username-to-watch"
+BOT_CLIENT_ID="twitch-client-id"
+BOT_ACCESS_TOKEN="twitch-oauth-token"
+BROADCASTER="twitch-login-to-watch"
+LOG_DIR="logs"
+LOG_FILE_NAME="bot.log"
 ```
 
-- `TOKEN` is your Discord user token used by `discord.py-self`.
-- `DEBUG_CHANNEL_ID` is an optional channel where you can post debug output via helper methods.
-- `BROADCAST_NOTIFY_USER_ID` is the account that should receive notifications when the watched streamer goes live.
-- `ENVIRONMENT` flag for your custom logic (currently informational).
-- `BOT_CLIENT_ID` and `BOT_ACCESS_TOKEN` come from your Twitch application and must have EventSub permissions.
-- `BROADCASTER` is the Twitch login name whose live status you want to monitor.
+- `TOKEN` – Discord user token consumed by `discord.py-self`.
+- `BROADCAST_NOTIFY_USER_ID` – Discord ID that should receive Twitch notifications (usually your own account).
+- `DEBUG_CHANNEL_ID` – optional channel ID for custom debug posts via `send_channel_message`.
+- `ENVIRONMENT` – informational flag if you want different behavior per env.
+- `BOT_CLIENT_ID` and `BOT_ACCESS_TOKEN` – Twitch app credentials with EventSub permissions.
+- `BROADCASTER` – Twitch login you want to monitor. Leave unset to skip the watcher.
+- `LOG_DIR` / `LOG_FILE_NAME` – override the default log destination (`logs/bot.log`).
 
-### Database
-- On first run `db_utils.init_db()` creates `bot_data.db` with tables for `status_requests`, `permissions`, and `categories`.
-- Records persist between runs; delete `bot_data.db` if you need a fresh start (note: you will lose every stored status and permission).
-- Emoji reactions in Discord can approve pending statuses (see command reference below).
+Store `.env` outside of version control. If you need multiple deployments, keep separate `.env` files per machine.
 
-## Running workload
-- The status rotation task picks a random approved entry every 25–45 minutes and sets it as your custom status.
-- `daily_status_task()` (not scheduled by default) demonstrates how to target a specific time of day if you want deterministic updates.
-- `is_live.test_eventsub()` opens a websocket to Twitch and prints to the console whenever `BROADCASTER` goes live. Extend `MyClient` helpers to DM or post to channels if desired.
+## Database
+- `db_utils.init_db()` creates `status_requests`, `categories`, and `permissions` (plus unique indexes) inside `bot_data.db`.
+- `status_requests` tracks `person_name`, `person_id`, `status`, `category`, and `approved_by_user_id`. Unapproved rows stay out of the rotation pool until the owner reacts with 👍.
+- `categories` stores user-defined labels so submissions can be filtered.
+- `permissions` stores trusted Discord IDs and optional labels for auditing.
+- Delete `bot_data.db` to reset everything; you'll lose statuses, categories, and permissions.
+
+## Runtime behavior
+- `MyClient` loads approved statuses at startup and schedules `rotate_status_task`, which sleeps a random 25–45 minutes between updates. Use `!change_status` to force an immediate refresh.
+- `!rotate_status` flips the rotation boolean so you can pause updates without stopping the process.
+- `test_eventsub` connects to Twitch EventSub, subscribes to the `stream.online` topic for `BROADCASTER`, and calls `send_discord_message` with the Twitch URL when it fires. Auto-reconnect handles keepalive gaps and rate limiting.
+- `!vedal_loop` toggles the internal `vedal_loop` flag, ready for wiring into additional watcher logic.
+- `parse_message_content` and `vedal_reaction` showcase lightweight keyword reactions (currently responds with ❤️ to a private meme phrase when it comes from `BROADCAST_NOTIFY_USER_ID`).
+- The background CLI thread keeps your terminal tidy without interrupting the asyncio event loop.
+
+## Logging and observability
+- `logging_utils.log` writes timestamped entries to `LOG_DIR/LOG_FILE_NAME` (default `logs/bot.log`) and can optionally print to stdout.
+- Admins can fetch logs directly from Discord with:
+  - `!logs` – last 10 lines.
+  - `!logs 25` – last _n_ lines.
+  - `!logs 50 26-11 10:41[:07]` – returns 50 lines closest to the provided `day-month hour:minute[:second]`.
+- The helper clamps long output to Discord’s 2 000 character limit and mirrors every request in the log file for auditing.
 
 ## Discord commands
-All commands run in DMs to yourself (typical for self-bots) or in channels where your account can post. Only users listed in `permissions` may interact with the status workflow unless noted.
+All commands work in DMs or guild channels where your self-bot can post. The owner (your user ID) is implicitly trusted; additional IDs must be added via `!add_permission`.
 
-### General
-- `!help` – display the public command list.
-- `!help 2` – display the admin command list (owner only).
-- `!ping` – health check (`pong`).
-- `!change_status` – immediately pick a new random approved status.
-- `!rotate_status` – toggle the automatic rotation task (owner only).
+**General**
+- `!help` – list public commands.
+- `!help 2` – list owner/admin commands.
+- `!ping` – sanity check (`pong`).
+- `!change_status` – set a new random approved status immediately.
+- `!rotate_status` – enable/disable automatic rotation (owner only).
 - `!vedal_loop` – toggle the Twitch watcher flag (owner only).
 
-### Status management
-- `!status_list <category>` – list approved statuses within a category.
-- `!my_status_list` – list every status you have submitted (shows ID and approval state).
-- `!my_status_list <category>` – narrow the list to a single category.
-- `!add_status <category> <status text>` – submit a new status to a category. The entry stays pending until approved.
-- `!remove_status <status_id>` – remove one of your submissions by its database ID.
-- React with the bot's confirmation emoji on a `!add_status` message to mark it approved (self-bot account only).
+**Status workflow**
+- `!status_list <category>` – show approved statuses in a category.
+- `!my_status_list` – list every submission you have made (IDs + approval state).
+- `!my_status_list <category>` – narrow the list to one category.
+- `!add_status <category> <status text>` – submit a new status for approval.
+- `!remove_status <status_id>` – delete one of your submissions (must match the numeric ID shown above).
+- Owner reacts with 👍 on a `!add_status` message to approve it.
 
-### Category management
-- `!category_list` – list all available categories.
-- `!add_category <name>` – create a new category (single word).
-- `!remove_category <name>` – delete a category you previously created.
+**Category management**
+- `!category_list` – display every category label.
+- `!add_category <label>` – create a category (single word).
+- `!remove_category <label>` – remove a category you created.
 
-### Permission management (owner only)
-- `!permissions_list` – view every user with elevated permissions.
-- `!add_permission <user_id> <label>` – grant a user access to status commands.
-- `!remove_permission <user_id>` – revoke a user's permission.
+**Permissions (owner only)**
+- `!permissions_list` – print all IDs with elevated access.
+- `!add_permission <user_id> <label>` – grant access and tag it with a label for context.
+- `!remove_permission <user_id>` – revoke a user.
+
+**Logs (owner only)**
+- `!logs [how_many] [day-month hour:minute[:second]]` – send the tail of `logs/bot.log` or the lines closest to the provided timestamp. Arguments are optional as described in the logging section above.
 
 ## Custom triggers
-Messages that match specific phrases (see `vedal_reaction` in `discord_module.py`) receive automatic emoji reactions, showcasing how to bolt on lightweight moderation or meme responses.
+`vedal_reaction` in `discord_module.py` is a template for meme-y reactions. When the tracked user posts a message that reduces to `ty chuju`/`ty huju`, the bot reacts with ❤️. Replace the trigger list to bolt on moderation tools or inside jokes.
 
 ## Extending the bot
-- Use `send_discord_message` and `send_channel_message` helpers in `MyClient` to deliver Twitch notifications to users or channels instead of just printing.
-- Add new background tasks via `on_ready` once the client connects; remember to gate them with booleans like `bg_tasks_started` to avoid duplicates.
-- If you change the schema, update `db_utils.init_db()` and provide migration steps for existing `bot_data.db` files.
+- `send_discord_message` and `send_channel_message` provide reusable plumbing for DMing Twitch pings, status alerts, or anything else from background tasks.
+- Add new background tasks in `on_ready` and guard them with `bg_tasks_started` booleans to avoid duplicate scheduling.
+- Update `db_utils.init_db()` and document migration steps if you modify the schema so fresh installs and existing databases stay aligned.
 
 ## Development tips
-- Keep secrets out of version control—use `.env` locally and share a sanitized template instead.
-- Run the bot from an isolated account to avoid losing access to your main Discord profile.
-- SQLite is file-based; close the app before copying or editing `bot_data.db` with external tools.
+- Never commit your `.env` file—share a sanitized template instead.
+- Run the bot on an alternate Discord account to avoid risking your primary profile.
+- SQLite is file-based. Stop the process before copying or editing `bot_data.db` with external tools.
 
 ## License
-A license has not been provided. Consider adding one before distributing or accepting outside contributions.
+No license is included. Add one before distributing or taking contributions.
