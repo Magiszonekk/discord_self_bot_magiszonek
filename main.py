@@ -1,22 +1,25 @@
-import asyncio
-from discord_module import MyClient
+import uvicorn
 from db_utils import init_db
-from datetime import datetime
-from cli import start_cli  
 from dotenv import load_dotenv
 import os
 
+# Load environment variables first
 load_dotenv()
-DISCORD_TOKEN = os.getenv("TOKEN")
 
-client = MyClient()
+# Initialize database
+init_db()
 
-startup_time = datetime.now()
+if __name__ == "__main__":
+    host = os.getenv("WEB_HOST", "0.0.0.0")
+    port = int(os.getenv("WEB_PORT", "3003"))
 
-async def main():
-    init_db()
-    start_cli()  # launch the CLI interface
-    async with client:
-        await client.start(DISCORD_TOKEN)
+    print(f"Starting Discord Bot Web Panel on http://{host}:{port}")
+    print("Press Ctrl+C to stop")
 
-asyncio.run(main())
+    uvicorn.run(
+        "web_app:app",
+        host=host,
+        port=port,
+        reload=False,
+        log_level="info"
+    )

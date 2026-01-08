@@ -12,6 +12,7 @@ from db_utils import (
     add_permission, remove_permission
 )
 from is_live import test_eventsub
+from token_manager import get_token_manager
 from dotenv import load_dotenv
 import re
 from logging_utils import log
@@ -68,12 +69,9 @@ class MyClient(discord.Client):
             self.bg_tasks_started = True
             asyncio.create_task(self.rotate_status_task())
             try:
+                token_manager = get_token_manager()
                 asyncio.create_task(
-                    test_eventsub(
-                        os.getenv("BOT_CLIENT_ID"),
-                        os.getenv("BOT_ACCESS_TOKEN"),
-                        self
-                    )
+                    test_eventsub(token_manager, self)
                 )
                 print("✅ EventSub task started")
             except Exception as e:

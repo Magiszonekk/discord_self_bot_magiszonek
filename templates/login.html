@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - Discord Bot Panel</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="login-page">
+    <div class="login-container">
+        <h1>Discord Bot Panel</h1>
+        <form method="post" action="/login">
+            {% if error %}
+            <div class="error">{{ error }}</div>
+            {% endif %}
+            <div class="form-group">
+                <label for="password">Haslo:</label>
+                <input type="password" id="password" name="password" required autofocus>
+            </div>
+            <button type="submit" class="btn btn-primary">Zaloguj</button>
+        </form>
+    </div>
+</body>
+</html>

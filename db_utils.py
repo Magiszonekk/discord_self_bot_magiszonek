@@ -119,6 +119,19 @@ def approve_status_by_value(status: str, approved_by_user_id: int):
     conn.commit()
     conn.close()
 
+
+def approve_status_by_id(status_id: int, approved_by_user_id: int):
+    conn = sqlite3.connect("bot_data.db")
+    cursor = conn.cursor()
+
+    cursor.execute(
+        "UPDATE status_requests SET approved_by_user_id = ? WHERE id = ?",
+        (approved_by_user_id, status_id)
+    )
+
+    conn.commit()
+    conn.close()
+
 def get_status_by_category_and_user(category: str, person_id: int):
     conn = sqlite3.connect("bot_data.db")
     conn.row_factory = sqlite3.Row
