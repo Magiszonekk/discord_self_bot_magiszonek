@@ -3,16 +3,20 @@ import random
 import asyncio
 from datetime import datetime
 from typing import Optional
-from fastapi import FastAPI, Request, Form, HTTPException, Depends, Response
-from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
+from time import time
+from collections import defaultdict
+from fastapi import FastAPI, Request, Form, HTTPException
+from fastapi.responses import RedirectResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
+from fastapi.middleware.cors import CORSMiddleware
 
+import json
 from db_utils import (
     get_all_statuses, add_status_request, remove_status, approve_status_by_id,
-    get_approved_statuses, get_all_categories, add_category, remove_category,
-    get_statuses_by_category, does_status_exist
+    revoke_status_approval_by_id, get_approved_statuses, get_all_categories,
+    add_category, remove_category, get_statuses_by_category, does_status_exist,
+    verify_user, init_default_users, save_fake_dm, get_fake_dms
 )
 from discord_actions import get_discord_actions
 from logging_utils import log, get_logs_closest_to, get_latest_logs, get_log_files
@@ -20,21 +24,31 @@ from token_manager import get_token_manager
 
 app = FastAPI(title="Discord Bot Control Panel")
 
+# CORS middleware for React frontend
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:3004",
+        "http://selfbot.cikowice.pl",
+        "https://selfbot.cikowice.pl",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 # Session middleware for auth
+import secrets
+_session_secret = os.getenv("SESSION_SECRET", secrets.token_hex(32))
 app.add_middleware(
     SessionMiddleware,
-    secret_key=os.getenv("WEB_PASSWORD", "change-me-please"),
+    secret_key=_session_secret,
     max_age=86400  # 24 hours
 )
 
-# Templates and static files
-templates_dir = os.path.join(os.path.dirname(__file__), "templates")
+# Static files (optional, for legacy support)
 static_dir = os.path.join(os.path.dirname(__file__), "static")
-
-os.makedirs(templates_dir, exist_ok=True)
 os.makedirs(static_dir, exist_ok=True)
-
-templates = Jinja2Templates(directory=templates_dir)
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
 
@@ -73,6 +87,36 @@ def is_authenticated(request: Request) -> bool:
 def require_auth(request: Request):
     if not is_authenticated(request):
         raise HTTPException(status_code=401, detail="Not authenticated")
+
+
+# ============== Brute Force Protection ==============
+
+_login_attempts = defaultdict(lambda: {"count": 0, "blocked_until": 0})
+MAX_LOGIN_ATTEMPTS = 5
+BLOCK_DURATION = 900  # 15 minutes
+
+
+def check_brute_force(ip: str) -> bool:
+    """Returns True if IP is blocked."""
+    data = _login_attempts[ip]
+    if data["blocked_until"] > time():
+        return True
+    return False
+
+
+def record_failed_login(ip: str):
+    """Record a failed login attempt."""
+    data = _login_attempts[ip]
+    data["count"] += 1
+    if data["count"] >= MAX_LOGIN_ATTEMPTS:
+        data["blocked_until"] = time() + BLOCK_DURATION
+        data["count"] = 0
+        log(f"[AUTH] IP {ip} blocked for {BLOCK_DURATION}s (brute force)", True, "warning")
+
+
+def reset_login_attempts(ip: str):
+    """Reset login attempts after successful login."""
+    _login_attempts[ip] = {"count": 0, "blocked_until": 0}
 
 
 # ============== Background Tasks ==============
@@ -125,51 +169,75 @@ async def stop_rotation():
 
 # ============== Auth Routes ==============
 
-@app.get("/login", response_class=HTMLResponse)
-async def login_page(request: Request):
-    if is_authenticated(request):
-        return RedirectResponse(url="/", status_code=302)
-    return templates.TemplateResponse("login.html", {"request": request, "error": None})
+@app.post("/api/login")
+async def login(request: Request):
+    ip = request.client.host
 
+    # Check brute force protection
+    if check_brute_force(ip):
+        log(f"[AUTH] Blocked login attempt from {ip} (brute force)", True, "warning")
+        return JSONResponse(
+            {"success": False, "error": "Too many attempts. Try again later."},
+            status_code=429
+        )
 
-@app.post("/login")
-async def login(request: Request, password: str = Form(...)):
-    correct_password = os.getenv("WEB_PASSWORD", "admin")
-    if password == correct_password:
-        request.session["authenticated"] = True
-        log(f"[AUTH] Login successful from {request.client.host}", True)
-        return RedirectResponse(url="/", status_code=302)
+    content_type = request.headers.get("content-type", "")
+
+    if "application/json" in content_type:
+        body = await request.json()
+        username = body.get("username", "")
+        password = body.get("password", "")
     else:
-        log(f"[AUTH] Login failed from {request.client.host}", True, "warning")
-        return templates.TemplateResponse("login.html", {"request": request, "error": "Nieprawidlowe haslo"})
+        form = await request.form()
+        username = form.get("username", "")
+        password = form.get("password", "")
+
+    user = verify_user(username, password)
+    if user:
+        reset_login_attempts(ip)
+        request.session["authenticated"] = True
+        request.session["user_id"] = user["id"]
+        request.session["username"] = user["username"]
+        request.session["permissions"] = json.loads(user["permissions"])
+        log(f"[AUTH] Login successful: {username} from {ip}", True)
+
+        return JSONResponse({"success": True, "message": "Logged in successfully"})
+    else:
+        record_failed_login(ip)
+        log(f"[AUTH] Login failed: {username} from {ip}", True, "warning")
+        return JSONResponse({"success": False, "error": "Invalid credentials"}, status_code=401)
 
 
-@app.get("/logout")
+@app.get("/api/logout")
 async def logout(request: Request):
     request.session.clear()
-    return RedirectResponse(url="/login", status_code=302)
+    # Check if JSON response requested
+    accept = request.headers.get("accept", "")
+    if "application/json" in accept:
+        return JSONResponse({"success": True, "message": "Logged out"})
+    return JSONResponse({"success": True, "message": "Logged out"})
+
+
+@app.get("/api/auth/status")
+async def auth_status(request: Request):
+    """Check if user is authenticated - for React frontend."""
+    if is_authenticated(request):
+        return JSONResponse({
+            "authenticated": True,
+            "username": request.session.get("username"),
+            "permissions": request.session.get("permissions", [])
+        })
+    return JSONResponse({"authenticated": False})
 
 
 # ============== Dashboard ==============
 
-@app.get("/", response_class=HTMLResponse)
-async def dashboard(request: Request):
-    if not is_authenticated(request):
-        return RedirectResponse(url="/login", status_code=302)
-
-    state.reload_statuses()
-    all_statuses = get_all_statuses()
-    categories = get_all_categories()
-
-    return templates.TemplateResponse("index.html", {
-        "request": request,
-        "statuses": all_statuses,
-        "approved_count": len(state.statuses),
-        "categories": categories,
-        "eventsub_running": state.eventsub_running,
-        "rotation_enabled": state.rotation_enabled,
-        "rotation_min": state.rotation_interval_min,
-        "rotation_max": state.rotation_interval_max,
+@app.get("/")
+async def dashboard():
+    """Redirect to React frontend or show API info."""
+    return JSONResponse({
+        "message": "Discord Bot Panel API",
+        "docs": "/docs"
     })
 
 
@@ -201,7 +269,7 @@ async def api_add_status(request: Request, status: str = Form(...), category: st
         category=category
     )
     log(f"[WEB] Status added: {status}", True)
-    return RedirectResponse(url="/", status_code=302)
+    return JSONResponse({"success": True, "message": "Status added"})
 
 
 @app.post("/api/statuses/{status_id}/delete")
@@ -209,15 +277,23 @@ async def api_delete_status(request: Request, status_id: int):
     require_auth(request)
     remove_status(status_id)
     log(f"[WEB] Status deleted: id={status_id}", True)
-    return RedirectResponse(url="/", status_code=302)
+    return JSONResponse({"success": True, "message": "Status deleted"})
 
 
 @app.post("/api/statuses/{status_id}/approve")
 async def api_approve_status(request: Request, status_id: int):
     require_auth(request)
-    approve_status_by_id(status_id, 0)  # 0 = web panel
+    approve_status_by_id(status_id, 1)  # 1 = web panel (0 is falsy in JS)
     log(f"[WEB] Status approved: id={status_id}", True)
-    return RedirectResponse(url="/", status_code=302)
+    return JSONResponse({"success": True, "message": "Status approved"})
+
+
+@app.post("/api/statuses/{status_id}/revoke")
+async def api_revoke_status(request: Request, status_id: int):
+    require_auth(request)
+    revoke_status_approval_by_id(status_id)
+    log(f"[WEB] Status approval revoked: id={status_id}", True)
+    return JSONResponse({"success": True, "message": "Status approval revoked"})
 
 
 # ============== Category API ==============
@@ -235,7 +311,7 @@ async def api_add_category(request: Request, name: str = Form(...)):
         raise HTTPException(status_code=400, detail="Category name cannot contain spaces")
     add_category(created_by_user_id=0, label=name)
     log(f"[WEB] Category added: {name}", True)
-    return RedirectResponse(url="/", status_code=302)
+    return JSONResponse({"success": True, "message": "Category added"})
 
 
 @app.post("/api/categories/{name}/delete")
@@ -243,7 +319,7 @@ async def api_delete_category(request: Request, name: str):
     require_auth(request)
     remove_category(name)
     log(f"[WEB] Category deleted: {name}", True)
-    return RedirectResponse(url="/", status_code=302)
+    return JSONResponse({"success": True, "message": "Category deleted"})
 
 
 # ============== Discord Actions API ==============
@@ -267,7 +343,7 @@ async def api_change_status(request: Request, status: str = Form(None), random_s
 
     if success:
         log(f"[WEB] Manual status change: {status}", True)
-        return RedirectResponse(url="/", status_code=302)
+        return JSONResponse({"success": True, "status": status})
     else:
         raise HTTPException(status_code=500, detail="Failed to change status")
 
@@ -276,14 +352,37 @@ async def api_change_status(request: Request, status: str = Form(None), random_s
 async def api_send_dm(request: Request, user_id: int = Form(...), message: str = Form(...)):
     require_auth(request)
 
-    discord_actions = get_discord_actions()
-    success = await discord_actions.send_dm(user_id, message)
+    perms = request.session.get("permissions", [])
+    can_send_dm = "all" in perms and "-send_dm" not in perms
 
-    if success:
-        log(f"[WEB] DM sent to {user_id}", True)
-        return RedirectResponse(url="/", status_code=302)
+    if can_send_dm:
+        # Real DM send
+        discord_actions = get_discord_actions()
+        success, username = await discord_actions.send_dm(user_id, message)
+
+        if success:
+            log(f"[WEB] DM sent to {user_id} ({username}) by {request.session.get('username')}", True)
+            return JSONResponse({"success": True, "message": "DM sent", "username": username})
+        else:
+            raise HTTPException(status_code=500, detail="Failed to send DM")
     else:
-        raise HTTPException(status_code=500, detail="Failed to send DM")
+        # HONEYPOT - fake send, save to database
+        sender_id = request.session.get("user_id")
+        sender_username = request.session.get("username")
+        save_fake_dm(sender_id, sender_username, str(user_id), message)
+        log(f"[HONEYPOT] User '{sender_username}' tried to DM {user_id}: {message}", True, "warning")
+
+        # Fake delay to make it look realistic
+        await asyncio.sleep(random.uniform(1.5, 3.0))
+        return JSONResponse({"success": True, "message": "DM sent", "username": "User"})
+
+
+@app.get("/api/discord/dm-recipients")
+async def api_get_dm_recipients(request: Request):
+    require_auth(request)
+    discord_actions = get_discord_actions()
+    recipients = await discord_actions.get_dm_channels(limit=20)
+    return recipients
 
 
 # ============== EventSub API ==============
@@ -302,7 +401,7 @@ async def api_eventsub_start(request: Request):
         state.eventsub_task = asyncio.create_task(start_eventsub())
         state.eventsub_running = True
         log("[WEB] EventSub started", True)
-    return RedirectResponse(url="/", status_code=302)
+    return JSONResponse({"success": True, "running": state.eventsub_running})
 
 
 @app.post("/api/eventsub/stop")
@@ -319,7 +418,7 @@ async def api_eventsub_stop(request: Request):
                 pass
         state.eventsub_running = False
         log("[WEB] EventSub stopped", True)
-    return RedirectResponse(url="/", status_code=302)
+    return JSONResponse({"success": True, "running": state.eventsub_running})
 
 
 # ============== Rotation API ==============
@@ -327,10 +426,12 @@ async def api_eventsub_stop(request: Request):
 @app.get("/api/rotation/status")
 async def api_rotation_status(request: Request):
     require_auth(request)
+    state.reload_statuses()
     return {
         "enabled": state.rotation_enabled,
         "interval_min": state.rotation_interval_min,
-        "interval_max": state.rotation_interval_max
+        "interval_max": state.rotation_interval_max,
+        "approved_count": len(state.statuses)
     }
 
 
@@ -341,7 +442,7 @@ async def api_rotation_toggle(request: Request):
         await stop_rotation()
     else:
         await start_rotation()
-    return RedirectResponse(url="/", status_code=302)
+    return JSONResponse({"success": True, "enabled": state.rotation_enabled})
 
 
 @app.post("/api/rotation/settings")
@@ -352,7 +453,7 @@ async def api_rotation_settings(request: Request, min_minutes: int = Form(...), 
     state.rotation_interval_min = min_minutes
     state.rotation_interval_max = max_minutes
     log(f"[WEB] Rotation interval changed: {min_minutes}-{max_minutes} min", True)
-    return RedirectResponse(url="/", status_code=302)
+    return JSONResponse({"success": True, "interval_min": min_minutes, "interval_max": max_minutes})
 
 
 # ============== Logs API ==============
@@ -371,12 +472,35 @@ async def api_get_log_files(request: Request):
     return {"files": [f.name for f in files]}
 
 
+# ============== Daily Backup ==============
+
+async def daily_backup_loop():
+    """Background task for daily database backup."""
+    while True:
+        await asyncio.sleep(86400)  # 24 hours
+        try:
+            from backup_utils import run_backup
+            run_backup()
+        except Exception as e:
+            log(f"[BACKUP] Error: {e}", True, "error")
+
+
 # ============== Startup/Shutdown ==============
 
 @app.on_event("startup")
 async def startup_event():
     log("[WEB] Starting web server...", True)
     state.reload_statuses()
+
+    # Run backup at startup
+    try:
+        from backup_utils import run_backup
+        run_backup()
+    except Exception as e:
+        log(f"[BACKUP] Startup backup failed: {e}", True, "error")
+
+    # Start daily backup task
+    asyncio.create_task(daily_backup_loop())
 
     # Start rotation by default
     await start_rotation()

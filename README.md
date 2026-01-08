@@ -5,6 +5,10 @@ Discord self-bot that rotates curated custom statuses, manages community submiss
 > ⚠️ Discord self-bots violate Discord's Terms of Service. Run this only on accounts you accept losing and preferably on a throwaway profile.
 
 ## What you get
+- **Web Panel** – React-based dashboard for managing the bot without Discord commands.
+- **Multi-user auth** – Admin and user accounts with permissions. Honeypot feature for monitoring unauthorized DM attempts.
+- **Brute force protection** – IP-based login throttling (5 attempts = 15 min block).
+- **Database backups** – Automatic daily backups with 7-day retention.
 - Automatic rotation of approved statuses every 25–45 minutes with manual override and enable/disable switches.
 - Status submission workflow with categories, per-user lists, and owner approvals driven by a 👍 reaction on `!add_status` messages.
 - Permission gates so only trusted IDs can interact with the workflow, plus owner-only admin and logging commands.
@@ -14,18 +18,23 @@ Discord self-bot that rotates curated custom statuses, manages community submiss
 - Helpers for DMing or posting updates to channels, ready for custom automation beyond Twitch alerts.
 
 ## Project layout
-- `main.py` – entry point; loads `.env`, initializes the database, starts the CLI, and runs the Discord client.
+- `main.py` – entry point; loads `.env`, initializes the database, creates default users, and starts the web server.
+- `web_app.py` – FastAPI backend with REST API, authentication, brute force protection, and backup scheduler.
+- `discord_actions.py` – on-demand Discord client for status changes, DMs, and fetching recent conversations.
 - `discord_module.py` – `discord.py-self` client with command handlers, rotation logic, Twitch glue, logging hooks, and DM/channel helpers.
-- `db_utils.py` – SQLite helpers for statuses (with `category` and `approved_by_user_id`), categories, and permissions stored in `bot_data.db`.
+- `db_utils.py` – SQLite helpers for statuses, categories, permissions, users, and fake DMs (honeypot).
+- `backup_utils.py` – database backup and cleanup utilities.
 - `is_live.py` – Twitch EventSub websocket client plus REST helper to look up broadcaster IDs.
 - `logging_utils.py` – file logger, log-tail helper, and Discord command handler for serving log slices.
-- `cli.py` – daemon thread that prints `CLI ready 😎` and accepts `cls` to clear your shell.
-- `bot_data.db` – default SQLite database; delete it to start fresh.
+- `frontend/` – Next.js React dashboard (run `npm install && npm run build` inside).
+- `backups/` – automatic database backups (ignored by Git).
+- `bot_data.db` – SQLite database; delete it to reset (new admin password will be generated).
 - `.env` – local environment variables (ignored by Git).
 
 ## Requirements
 - Python 3.10+ (CPython tested).
 - `pip`, `virtualenv`, and SQLite (bundled with Python).
+- Node.js 18+ and npm (for the web panel frontend).
 - A Discord user token you control (see ToS warning).
 - Twitch Application client ID + OAuth token if you use the go-live watcher.
 
@@ -37,42 +46,101 @@ Discord self-bot that rotates curated custom statuses, manages community submiss
    source .venv/bin/activate  # Windows: .venv\Scripts\activate
    pip install -r requirements.txt
    ```
-3. **Create `.env`** with the variables below (only keep the ones you need).
-4. **Run the bot**:
+3. **Build the frontend (optional, for web panel):**
+   ```bash
+   cd frontend
+   npm install
+   npm run build
+   cd ..
+   ```
+4. **Create `.env`** with the variables below (only keep the ones you need).
+5. **Run the bot**:
    ```bash
    python main.py
    ```
-   The CLI thread announces `CLI ready 😎`—type `cls` or `csl` in the terminal to clear the screen while the bot keeps running.
+   On first run, the admin password is printed to console—**save it immediately**.
+   The web panel is available at `http://localhost:3003`.
 
 ### Environment variables
 ```dotenv
+# Discord
 TOKEN="discord-user-token"
 BROADCAST_NOTIFY_USER_ID="123456789012345678"
 DEBUG_CHANNEL_ID="123456789012345678"
-ENVIRONMENT="development"
+
+# Web Panel
+WEB_HOST="0.0.0.0"
+WEB_PORT="3003"
+SESSION_SECRET="your-secret-key"
+
+# Twitch (optional)
 BOT_CLIENT_ID="twitch-client-id"
 BOT_ACCESS_TOKEN="twitch-oauth-token"
 BROADCASTER="twitch-login-to-watch"
+
+# Logging
 LOG_DIR="logs"
 LOG_FILE_NAME="bot.log"
+ENVIRONMENT="development"
 ```
 
 - `TOKEN` – Discord user token consumed by `discord.py-self`.
 - `BROADCAST_NOTIFY_USER_ID` – Discord ID that should receive Twitch notifications (usually your own account).
 - `DEBUG_CHANNEL_ID` – optional channel ID for custom debug posts via `send_channel_message`.
-- `ENVIRONMENT` – informational flag if you want different behavior per env.
+- `WEB_HOST` – host for the web panel (default `0.0.0.0`).
+- `WEB_PORT` – port for the web panel (default `3003`).
+- `SESSION_SECRET` – secret key for session encryption. Generate a strong random value.
 - `BOT_CLIENT_ID` and `BOT_ACCESS_TOKEN` – Twitch app credentials with EventSub permissions.
 - `BROADCASTER` – Twitch login you want to monitor. Leave unset to skip the watcher.
 - `LOG_DIR` / `LOG_FILE_NAME` – override the default log destination (`logs/bot.log`).
+- `ENVIRONMENT` – informational flag if you want different behavior per env.
 
 Store `.env` outside of version control. If you need multiple deployments, keep separate `.env` files per machine.
 
+## Web Panel
+
+The web panel runs on `http://localhost:3003` by default and provides a React-based dashboard for managing the bot.
+
+### Default users
+On first run, the system creates two accounts:
+- **admin** – full access. Password is randomly generated and printed to console once. Save it immediately.
+- **user** – limited access (cannot send real DMs). Default password: `admin123`.
+
+### Changing passwords
+```python
+from db_utils import change_user_password
+change_user_password("admin", "new-password")
+```
+
+### Permission system
+Permissions are stored as a JSON array. Special values:
+- `"all"` – grants all permissions.
+- `"-send_dm"` – revokes DM sending (negative permission).
+- `"admin"` – grants access to admin-only endpoints.
+
+The `user` account has `["all", "-send_dm"]` by default, meaning it can do everything except send real DMs.
+
+### Honeypot feature
+When a user without DM permission tries to send a message:
+1. The system pretends the DM was sent successfully.
+2. The message is saved to the `fake_dms` table for review.
+3. A warning is logged: `[HONEYPOT] User 'x' tried to DM y: message`.
+
+Admins can review honeypot entries via the `/api/admin/fake-dms` endpoint.
+
+### Security features
+- **Brute force protection** – 5 failed login attempts from the same IP triggers a 15-minute block.
+- **Session-based auth** – credentials are not stored in browser storage.
+- **Daily backups** – database is backed up at startup and every 24 hours to `backups/`.
+
 ## Database
-- `db_utils.init_db()` creates `status_requests`, `categories`, and `permissions` (plus unique indexes) inside `bot_data.db`.
-- `status_requests` tracks `person_name`, `person_id`, `status`, `category`, and `approved_by_user_id`. Unapproved rows stay out of the rotation pool until the owner reacts with 👍.
-- `categories` stores user-defined labels so submissions can be filtered.
-- `permissions` stores trusted Discord IDs and optional labels for auditing.
-- Delete `bot_data.db` to reset everything; you'll lose statuses, categories, and permissions.
+- `db_utils.init_db()` creates tables inside `bot_data.db`:
+  - `status_requests` – tracks `person_name`, `person_id`, `status`, `category`, and `approved_by_user_id`. Unapproved rows stay out of the rotation pool until the owner reacts with thumbs up.
+  - `categories` – user-defined labels for filtering submissions.
+  - `permissions` – trusted Discord IDs and optional labels for auditing.
+  - `users` – web panel accounts with bcrypt-hashed passwords and permissions.
+  - `fake_dms` – honeypot table storing unauthorized DM attempts.
+- Delete `bot_data.db` to reset everything; you'll lose all data and a new admin password will be generated.
 
 ## Runtime behavior
 - `MyClient` loads approved statuses at startup and schedules `rotate_status_task`, which sleeps a random 25–45 minutes between updates. Use `!change_status` to force an immediate refresh.

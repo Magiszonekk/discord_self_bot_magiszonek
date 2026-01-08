@@ -1,4 +1,7 @@
 import sqlite3
+import secrets
+import bcrypt
+import json
 
 conn = sqlite3.connect("bot_data.db")
 cursor = conn.cursor()
@@ -46,15 +49,36 @@ def init_db():
     """)
 
     cursor.execute("""
-        CREATE UNIQUE INDEX IF NOT EXISTS category_unique_idx 
+        CREATE UNIQUE INDEX IF NOT EXISTS category_unique_idx
         ON categories (label);
     """)
 
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT NOT NULL UNIQUE,
+        password_hash TEXT NOT NULL,
+        permissions TEXT NOT NULL DEFAULT '["all"]',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
+
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS fake_dms (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        sender_user_id INTEGER NOT NULL,
+        sender_username TEXT NOT NULL,
+        recipient_discord_id TEXT NOT NULL,
+        message TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (sender_user_id) REFERENCES users(id)
+    )
+    """)
 
     conn.commit()
     conn.close()
 
-    print("✅ Database ready (table 'status_requests' checked or created)")
+    print("✅ Database ready")
 
 def get_all_statuses():
     conn = sqlite3.connect("bot_data.db")
@@ -127,6 +151,30 @@ def approve_status_by_id(status_id: int, approved_by_user_id: int):
     cursor.execute(
         "UPDATE status_requests SET approved_by_user_id = ? WHERE id = ?",
         (approved_by_user_id, status_id)
+    )
+
+    conn.commit()
+    conn.close()
+
+def revoke_status_approval_by_id(status_id: int):
+    conn = sqlite3.connect("bot_data.db")
+    cursor = conn.cursor()
+
+    cursor.execute(
+        "UPDATE status_requests SET approved_by_user_id = NULL WHERE id = ?",
+        (status_id,)
+    )
+
+    conn.commit()
+    conn.close()
+
+def revoke_status_approval_by_value(status: str):
+    conn = sqlite3.connect("bot_data.db")
+    cursor = conn.cursor()
+
+    cursor.execute(
+        "UPDATE status_requests SET approved_by_user_id = NULL WHERE status = ?",
+        (status,)
     )
 
     conn.commit()
@@ -274,3 +322,125 @@ def remove_permission(user_id: int):
 
     conn.commit()
     conn.close()
+
+
+# ============== User Authentication ==============
+
+def _hash_password(password: str) -> str:
+    return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+
+
+def _verify_password(password: str, password_hash: str) -> bool:
+    return bcrypt.checkpw(password.encode('utf-8'), password_hash.encode('utf-8'))
+
+
+def get_user_by_username(username: str):
+    conn = sqlite3.connect("bot_data.db")
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT * FROM users WHERE username = ?", (username,))
+    row = cursor.fetchone()
+
+    conn.close()
+    return dict(row) if row else None
+
+
+def verify_user(username: str, password: str):
+    """Verify username and password. Returns user dict or None."""
+    user = get_user_by_username(username)
+    if user and _verify_password(password, user["password_hash"]):
+        return user
+    return None
+
+
+def create_user(username: str, password: str, permissions: list) -> bool:
+    """Create a new user. Returns True on success, False if user exists."""
+    conn = sqlite3.connect("bot_data.db")
+    cursor = conn.cursor()
+
+    try:
+        password_hash = _hash_password(password)
+        cursor.execute(
+            "INSERT INTO users (username, password_hash, permissions) VALUES (?, ?, ?)",
+            (username, password_hash, json.dumps(permissions))
+        )
+        conn.commit()
+        return True
+    except sqlite3.IntegrityError:
+        return False
+    finally:
+        conn.close()
+
+
+def change_user_password(username: str, new_password: str) -> bool:
+    """Change password for a user. Returns True on success, False if user not found."""
+    conn = sqlite3.connect("bot_data.db")
+    cursor = conn.cursor()
+
+    password_hash = _hash_password(new_password)
+    cursor.execute(
+        "UPDATE users SET password_hash = ? WHERE username = ?",
+        (password_hash, username)
+    )
+
+    rows_affected = cursor.rowcount
+    conn.commit()
+    conn.close()
+
+    return rows_affected > 0
+
+
+def init_default_users() -> str | None:
+    """
+    Initialize default users if they don't exist.
+    Returns admin password if newly created, None otherwise.
+    """
+    admin_password = None
+
+    # Check if admin exists
+    if not get_user_by_username("admin"):
+        admin_password = secrets.token_urlsafe(12)
+        create_user("admin", admin_password, ["all", "admin"])
+        print(f"🔐 Admin user created. Password: {admin_password}")
+        print("⚠️  Save this password! It won't be shown again.")
+
+    # Check if user exists
+    if not get_user_by_username("user"):
+        create_user("user", "admin123", ["all", "-send_dm"])
+        print("👤 User 'user' created with password 'admin123'")
+
+    return admin_password
+
+
+# ============== Fake DMs (Honeypot) ==============
+
+def save_fake_dm(sender_user_id: int, sender_username: str, recipient_discord_id: str, message: str):
+    """Save a fake DM attempt to the honeypot table."""
+    conn = sqlite3.connect("bot_data.db")
+    cursor = conn.cursor()
+
+    cursor.execute(
+        "INSERT INTO fake_dms (sender_user_id, sender_username, recipient_discord_id, message) VALUES (?, ?, ?, ?)",
+        (sender_user_id, sender_username, recipient_discord_id, message)
+    )
+
+    conn.commit()
+    conn.close()
+
+
+def get_fake_dms(limit: int = 50):
+    """Get list of fake DM attempts."""
+    conn = sqlite3.connect("bot_data.db")
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+
+    cursor.execute(
+        "SELECT * FROM fake_dms ORDER BY created_at DESC LIMIT ?",
+        (limit,)
+    )
+    rows = cursor.fetchall()
+
+    conn.close()
+    return [dict(row) for row in rows]
+

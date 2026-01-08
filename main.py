@@ -1,5 +1,5 @@
 import uvicorn
-from db_utils import init_db
+from db_utils import init_db, init_default_users
 from dotenv import load_dotenv
 import os
 
@@ -8,6 +8,9 @@ load_dotenv()
 
 # Initialize database
 init_db()
+
+# Initialize default users (admin + user)
+init_default_users()
 
 if __name__ == "__main__":
     host = os.getenv("WEB_HOST", "0.0.0.0")

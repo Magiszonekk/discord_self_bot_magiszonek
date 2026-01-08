@@ -18,8 +18,18 @@ venv2/
 .DS_Store
 Thumbs.db
 
+# Database
 bot_data.db
 
-venv.txt
+# Backups
+backups/
 
-/logs/
+# Logs
+logs/
+
+# Frontend
+frontend/node_modules/
+frontend/.next/
+
+# Misc
+venv.txt

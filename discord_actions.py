@@ -1,4 +1,5 @@
 import discord
+from discord.http import Route
 import asyncio
 import os
 from logging_utils import log
@@ -93,14 +94,14 @@ class DiscordActions:
             await self.disconnect()
             return False
 
-    async def send_dm(self, user_id: int, message: str) -> bool:
+    async def send_dm(self, user_id: int, message: str) -> tuple[bool, str | None]:
         """
         Connects to Discord, sends a DM, then disconnects.
-        Returns True on success, False on failure.
+        Returns tuple (success, username) - username is None on failure.
         """
         try:
             if not await self._ensure_connected():
-                return False
+                return False, None
 
             user = self.client.get_user(user_id)
             if user is None:
@@ -109,19 +110,20 @@ class DiscordActions:
                 except Exception as e:
                     log(f"Cannot fetch user {user_id}: {e}", True, "error")
                     await self.disconnect()
-                    return False
+                    return False, None
 
+            username = user.display_name or user.name
             await user.send(message)
-            log(f"DM sent to {user_id}: {message}", True)
+            log(f"DM sent to {user_id} ({username}): {message}", True)
 
             await asyncio.sleep(1)
             await self.disconnect()
-            return True
+            return True, username
 
         except Exception as e:
             log(f"Error sending DM: {e}", True, "error")
             await self.disconnect()
-            return False
+            return False, None
 
     async def send_channel_message(self, channel_id: int, message: str) -> bool:
         """
@@ -152,6 +154,43 @@ class DiscordActions:
             log(f"Error sending channel message: {e}", True, "error")
             await self.disconnect()
             return False
+
+    async def get_dm_channels(self, limit: int = 15) -> list:
+        """
+        Fetches the list of recent DM channels from Discord API.
+        Returns list of recipients with user_id, username, display_name, avatar.
+        Sorted by last message (most recent first).
+        """
+        try:
+            if not await self._ensure_connected():
+                return []
+
+            channels = await self.client.http.request(Route("GET", "/users/@me/channels"))
+
+            # Filter only DM channels (type 1) and sort by last_message_id (snowflake = timestamp)
+            dm_channels_raw = [ch for ch in channels if ch.get("type") == 1]
+            dm_channels_raw.sort(
+                key=lambda ch: int(ch.get("last_message_id") or 0),
+                reverse=True
+            )
+
+            dm_channels = []
+            for ch in dm_channels_raw[:limit]:
+                recipient = ch.get("recipients", [{}])[0]
+                dm_channels.append({
+                    "user_id": recipient.get("id"),
+                    "username": recipient.get("username"),
+                    "display_name": recipient.get("global_name") or recipient.get("username"),
+                    "avatar": recipient.get("avatar")
+                })
+
+            await self.disconnect()
+            return dm_channels
+
+        except Exception as e:
+            log(f"Error fetching DM channels: {e}", True, "error")
+            await self.disconnect()
+            return []
 
 
 # Global instance
